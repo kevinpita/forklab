@@ -2,9 +2,13 @@
 package cli
 
 import (
+	"context"
 	"io"
+	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/kevinpita/forklab/internal/cli/output"
 	"github.com/spf13/cobra"
@@ -30,14 +34,18 @@ func newRootCmd(a *app) *cobra.Command {
 		},
 	}
 	root.PersistentFlags().BoolVar(&a.json, "json", false, "print a JSON envelope instead of human output")
-	root.AddCommand(newVersionCmd(a), newProfileCmd(a))
+	root.AddCommand(newVersionCmd(a), newProfileCmd(a), newBinaryCmd(a))
 	return root
 }
 
 // Run executes forklab with args and returns the process exit code.
 func Run(args []string, stdout, stderr io.Writer) int {
 	a := &app{}
-	return execute(a, newRootCmd(a), args, stdout, stderr)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	root := newRootCmd(a)
+	root.SetContext(ctx)
+	return execute(a, root, args, stdout, stderr)
 }
 
 func execute(a *app, root *cobra.Command, args []string, stdout, stderr io.Writer) int {

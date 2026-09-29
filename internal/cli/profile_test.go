@@ -172,6 +172,7 @@ func TestProfileUsageErrors(t *testing.T) {
 		{"env for missing binary", []string{"profile", "edit", "simd", "--binary-env", "9.9.9=A=b"}, "no binary 9.9.9"},
 		{"edit without flags", []string{"profile", "edit", "simd"}, "no field flags"},
 		{"invalid edit names the path", []string{"profile", "edit", "simd", "--binary", "0.53.8=git:https://x"}, "binaries[0.53.8].ref: required (set with --binary-ref)"},
+		{"bad url template names --binary", []string{"profile", "edit", "simd", "--binary", "1.0=url:https://x/{nope}"}, "unknown template variable {nope}; known: {version} {os} {Os} {arch} {chain_id} (set with --binary)"},
 		{"remove missing binary", []string{"profile", "edit", "simd", "--remove-binary", "9.9.9"}, "no binary 9.9.9"},
 		{"remove missing snapshot", []string{"profile", "edit", "simd", "--remove-snapshot", "nope"}, "no snapshot nope"},
 		{"field for missing binary", []string{"profile", "edit", "simd", "--binary-out", "9.9.9=x"}, "no binary 9.9.9"},

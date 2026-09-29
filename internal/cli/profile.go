@@ -509,7 +509,9 @@ func flagFor(path string) string {
 		if strings.HasPrefix(path, l.prefix) {
 			if _, field, ok := strings.Cut(path, "]."); ok && l.flag == "binary" {
 				field, _, _ = strings.Cut(field, "[")
-				return "binary-" + field
+				if field == "ref" || field == "build" || field == "out" || field == "env" {
+					return "binary-" + field
+				}
 			}
 			return l.flag
 		}
