@@ -1,0 +1,37 @@
+name: xrplevm
+binary_name: exrpd
+chain_id: xrplevm_1440000-1
+bech32_prefix: ethm
+key_algo: eth_secp256k1
+bond_denom: apoa          # fork mode reads it from staking params; used for fresh
+fee_denom: axrp
+gas_prices: 800000000000axrp
+block_time: 1s
+export_args: ["--chain-id", "{chain_id}"]
+extra_ports:              # config keys offset by i*100 per node
+  app.toml:
+    json-rpc.address: 8545
+    json-rpc.ws-address: 8546
+    json-rpc.metrics-address: 6065
+    evm.geth-metrics-address: 8100
+gov: { voting_period: 30s, expedited_voting_period: 20s }
+upgrade_name: "v{version}"
+binaries:
+  "11.1.1": { url: "https://github.com/xrplevm/node/releases/download/v{version}/node_{version}_{Os}_{arch}.tar.gz" }
+  "11.2.0": { url: "https://github.com/xrplevm/node/releases/download/v{version}/node_{version}_{Os}_{arch}.tar.gz" }
+snapshots:
+  polkachu: "https://snapshots.polkachu.com/snapshots/xrp/xrp_latest.tar.lz4"
+# From local-node.sh in xrplevm/node v11.2.0. Mainnet state already has these.
+fresh_patches:
+  - '.consensus.params.block.max_gas = "10500000"'
+  - '.app_state.crisis.constant_fee.denom = "axrp"'
+  - '.app_state.evm.params.evm_denom = "axrp"'
+  - '.app_state.gov.params.min_deposit |= map(.denom = "axrp")'
+  - '.app_state.gov.params.expedited_min_deposit |= map(.denom = "axrp")'
+  - '.app_state.feemarket.params.base_fee = "0" | .app_state.feemarket.params.no_base_fee = true'
+  - '.app_state.bank.denom_metadata = [{"description": "XRP is the gas token", "denom_units": [{"denom": "axrp", "exponent": 0}, {"denom": "xrp", "exponent": 18}], "base": "axrp", "display": "xrp", "name": "XRP", "symbol": "XRP"}]'
+  - '.app_state.erc20.native_precompiles = ["0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"]'
+  - '.app_state.erc20.token_pairs = [{"contract_owner": 1, "erc20_address": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "denom": "axrp", "enabled": true, "owner_address": "ethm1zrxl239wa6ad5xge3gs68rt98227xgnjq0xyw2"}]'
+fork_patches:
+  - '.app_state.ratelimit.hour_epoch.epoch_start_height = (.initial_height|tonumber)'
+  - '.app_state.bank.denom_metadata |= map(.denom_units[0].denom = .base | .display = .base)'

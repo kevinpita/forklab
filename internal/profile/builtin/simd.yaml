@@ -1,0 +1,21 @@
+# Stock cosmos-sdk simapp.
+name: simd
+binary_name: simd
+chain_id: simd-1
+bech32_prefix: cosmos
+key_algo: secp256k1
+bond_denom: stake
+fee_denom: stake
+gas_prices: 0.025stake
+block_time: 1s
+gov: { voting_period: 30s, expedited_voting_period: 20s }
+upgrade_name: "v{version}"
+binaries:
+  # simapp pulls in bytedance/sonic, which breaks on Go 1.26+, and CGO needs a
+  # C toolchain that is not there outside devenv.
+  "0.53.8":
+    git: "https://github.com/cosmos/cosmos-sdk"
+    ref: "v{version}"
+    build: "cd simapp && go build -o simd ./simd"
+    out: "simapp/simd"
+    env: { GOTOOLCHAIN: go1.23.6, CGO_ENABLED: "0" }
