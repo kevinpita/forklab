@@ -19,16 +19,18 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: 1.27.x
+      - uses: extractions/setup-just@v4
       - name: gofumpt
         run: |
           go install mvdan.cc/gofumpt@v0.12.0
-          make fmt-check
+          just fmt
+          git diff --exit-code
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.13.2
       - name: test
-        run: make test-race
+        run: just test
       - name: build
         run: |
-          make build
+          just build
           ./bin/forklab version

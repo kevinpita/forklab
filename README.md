@@ -22,15 +22,15 @@ Enter it with `devenv shell`, or with direnv (`direnv allow`), or prefix a
 single command with `devenv shell --`.
 
 ```sh
-devenv shell -- make build
-./bin/forklab version
+devenv shell -- just build
+just run version
 ```
 
-| Target | What it does |
+| Recipe | What it does |
 |--------|--------------|
-| `make build` | Build `bin/forklab` with the version from `git describe` |
-| `make test` | Run the tests |
-| `make test-race` | Run the tests with the race detector |
-| `make lint` | Run golangci-lint |
-| `make fmt` | Format with gofumpt |
-| `make fmt-check` | Fail if any file is not gofumpt-formatted |
+| `just build` | Build `bin/forklab` with the version from `git describe` |
+| `just run <args>` | Build, then run `bin/forklab <args>` |
+| `just test` | Run the tests with the race detector |
+| `just lint` | Run golangci-lint |
+| `just fmt` | Format with gofumpt |
+| `just check` | fmt, lint, test and build, the same gate as CI |

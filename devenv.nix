@@ -15,8 +15,6 @@ in
     (pkgs.gotools.override { inherit buildGoModule; })
     pkgs.lz4
     pkgs.jq
+    pkgs.just
   ];
-
-  scripts.lint.exec = "golangci-lint run ./...";
-  scripts.fmt.exec = "gofumpt -l -w .";
 }
