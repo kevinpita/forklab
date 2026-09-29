@@ -5,7 +5,7 @@ lab of N local validators, from a fresh genesis or forked from a mainnet
 snapshot, and makes node control, governance, and software upgrades easy. It
 ships as one Go binary with an agent-first CLI and a TUI built on that CLI.
 
-Status: early development. See [the design spec](docs/specs/2026-09-29-forklab-design.md).
+Status: early development.
 
 ## CLI contract
 
