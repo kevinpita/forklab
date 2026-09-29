@@ -9,12 +9,13 @@ import (
 
 	"github.com/kevinpita/forklab/internal/binary"
 	"github.com/kevinpita/forklab/internal/cli/output"
+	"github.com/kevinpita/forklab/internal/paths"
 	"github.com/kevinpita/forklab/internal/profile"
 	"github.com/spf13/cobra"
 )
 
 func binaryCache() (binary.Cache, error) {
-	home, err := forklabHome()
+	home, err := paths.Home()
 	return binary.Cache{Dir: filepath.Join(home, "bin")}, err
 }
 

@@ -1,12 +1,13 @@
-package cli
+// Package paths resolves forklab's on-disk locations.
+package paths
 
 import (
 	"os"
 	"path/filepath"
 )
 
-// forklabHome is $FORKLAB_HOME, else ~/.forklab, made absolute.
-func forklabHome() (string, error) {
+// Home is $FORKLAB_HOME, else ~/.forklab, made absolute.
+func Home() (string, error) {
 	if d := os.Getenv("FORKLAB_HOME"); d != "" {
 		return filepath.Abs(d)
 	}

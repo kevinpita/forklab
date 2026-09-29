@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kevinpita/forklab/internal/paths"
+
 	"github.com/kevinpita/forklab/internal/snapshot"
 	"github.com/spf13/cobra"
 )
@@ -39,7 +41,7 @@ func newSnapshotCmd(a *app) *cobra.Command {
 		Short: "Download a snapshot into $FORKLAB_HOME/snapshots, and extract it with --home",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			root, err := forklabHome()
+			root, err := paths.Home()
 			if err != nil {
 				return err
 			}

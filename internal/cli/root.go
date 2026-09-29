@@ -34,7 +34,7 @@ func newRootCmd(a *app) *cobra.Command {
 		},
 	}
 	root.PersistentFlags().BoolVar(&a.json, "json", false, "print a JSON envelope instead of human output")
-	root.AddCommand(newVersionCmd(a), newProfileCmd(a), newBinaryCmd(a), newSnapshotCmd(a))
+	root.AddCommand(newVersionCmd(a), newProfileCmd(a), newBinaryCmd(a), newSnapshotCmd(a), newNodeCmd(a), newSupervisorCmd(a))
 	return root
 }
 
