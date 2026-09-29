@@ -1,0 +1,133 @@
+{
+  "jsonrpc": "2.0",
+  "id": -1,
+  "result": {
+    "round_state": {
+      "height": "33",
+      "round": 0,
+      "step": 4,
+      "start_time": "2026-09-29T23:06:19.683060423Z",
+      "commit_time": "2026-09-29T23:06:18.683060423Z",
+      "validators": {
+        "validators": [
+          {
+            "address": "D210B47681CC1A2C2F2022E2B17A90ADC771AD66",
+            "pub_key": {
+              "type": "tendermint/PubKeyEd25519",
+              "value": "GkYzzfPfuPdNJV2KRczoDLTXwVv9Y01mDpRiNJ/djqA="
+            },
+            "voting_power": "1000",
+            "proposer_priority": "-520"
+          },
+          {
+            "address": "A13EC63E611A08BECF16EF82385977E85790ED56",
+            "pub_key": {
+              "type": "tendermint/PubKeyEd25519",
+              "value": "M99IOv0v1wXI7LPzJCVV99NRhbSu7bWjuY+Z/scaBn4="
+            },
+            "voting_power": "800",
+            "proposer_priority": "-40"
+          },
+          {
+            "address": "26AAD91C928CE910BC2E5757350720BC085FE4EE",
+            "pub_key": {
+              "type": "tendermint/PubKeyEd25519",
+              "value": "4KCXJyEBYXX1rGqn5JdamlfC/ZUcludt81/lDY03e/Y="
+            },
+            "voting_power": "50",
+            "proposer_priority": "350"
+          },
+          {
+            "address": "7AB461DDC567998359697043B8DD19012186CBEE",
+            "pub_key": {
+              "type": "tendermint/PubKeyEd25519",
+              "value": "Cg8q3tgHYuGOZ5U8qRW442vgmUvc1t2xJo5ygtdDYhg="
+            },
+            "voting_power": "30",
+            "proposer_priority": "210"
+          }
+        ],
+        "proposer": {
+          "address": "D210B47681CC1A2C2F2022E2B17A90ADC771AD66",
+          "pub_key": {
+            "type": "tendermint/PubKeyEd25519",
+            "value": "GkYzzfPfuPdNJV2KRczoDLTXwVv9Y01mDpRiNJ/djqA="
+          },
+          "voting_power": "1000",
+          "proposer_priority": "-520"
+        }
+      },
+      "proposal": {
+        "Type": 32,
+        "height": "33",
+        "round": 0,
+        "pol_round": -1,
+        "block_id": {
+          "hash": "A4CA9434B045DB6598D817E874E0AABA26FB4170CE136BB4522423CB9EB011C7",
+          "parts": {
+            "total": 1,
+            "hash": "E2D8D039D61925797300C0D1636BADE6CFC7F76B93D216CF4E3DF66862C9BB53"
+          }
+        },
+        "timestamp": "2026-09-29T23:06:20.580672522Z",
+        "signature": "o2CTVjsO5rIQpWmZgp+Omqq4CAswrFvBc5H2s6Uf2hFE9uV80w3KiDhXkXSCWLWOXHXM9XNxsXJgJmZ6pRfHDA=="
+      },
+      "proposal_block": null,
+      "proposal_block_parts": null,
+      "locked_round": -1,
+      "locked_block": null,
+      "locked_block_parts": null,
+      "valid_round": -1,
+      "valid_block": null,
+      "valid_block_parts": null,
+      "votes": [
+        {
+          "round": 0,
+          "prevotes": [
+            "Vote{0:D210B47681CC 33/00/SIGNED_MSG_TYPE_PREVOTE(Prevote) A4CA9434B045 91244E7E3BFA 000000000000 @ 2026-09-29T23:06:21.030208453Z}",
+            "nil-Vote",
+            "nil-Vote",
+            "nil-Vote"
+          ],
+          "prevotes_bit_array": "BA{4:x___} 1000/1880 = 0.53",
+          "precommits": [
+            "nil-Vote",
+            "nil-Vote",
+            "nil-Vote",
+            "nil-Vote"
+          ],
+          "precommits_bit_array": "BA{4:____} 0/1880 = 0.00"
+        },
+        {
+          "round": 1,
+          "prevotes": [
+            "nil-Vote",
+            "nil-Vote",
+            "nil-Vote",
+            "nil-Vote"
+          ],
+          "prevotes_bit_array": "BA{4:____} 0/1880 = 0.00",
+          "precommits": [
+            "nil-Vote",
+            "nil-Vote",
+            "nil-Vote",
+            "nil-Vote"
+          ],
+          "precommits_bit_array": "BA{4:____} 0/1880 = 0.00"
+        }
+      ],
+      "commit_round": -1,
+      "last_commit": {
+        "votes": [
+          "Vote{0:D210B47681CC 32/00/SIGNED_MSG_TYPE_PRECOMMIT(Precommit) 157A0893197B F7A296226F66 000000000000 @ 2026-09-29T23:06:17.821466966Z}",
+          "Vote{1:A13EC63E611A 32/00/SIGNED_MSG_TYPE_PRECOMMIT(Precommit) 157A0893197B 19F2CD5F05E9 000000000000 @ 2026-09-29T23:06:17.972537859Z}",
+          "nil-Vote",
+          "nil-Vote"
+        ],
+        "votes_bit_array": "BA{4:xx__} 1800/1880 = 0.96",
+        "peer_maj_23s": {}
+      },
+      "triggered_timeout_precommit": false
+    }
+  }
+}

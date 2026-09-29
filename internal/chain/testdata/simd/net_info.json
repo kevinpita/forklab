@@ -1,0 +1,34 @@
+{
+  "jsonrpc": "2.0",
+  "id": -1,
+  "result": {
+    "listening": true,
+    "listeners": [
+      "Listener(@)"
+    ],
+    "n_peers": "1",
+    "peers": [
+      {
+        "node_info": {
+          "protocol_version": {
+            "p2p": "8",
+            "block": "11",
+            "app": "0"
+          },
+          "id": "2bcc1099e88183c46268f5cd70040909feeedcd7",
+          "listen_addr": "tcp://0.0.0.0:23616",
+          "network": "mainnet-1",
+          "version": "0.38.22",
+          "channels": "40202122233038606100",
+          "moniker": "fork1",
+          "other": {
+            "tx_index": "on",
+            "rpc_address": "tcp://127.0.0.1:23617"
+          }
+        },
+        "is_outbound": false,
+        "remote_ip": "127.0.0.1"
+      }
+    ]
+  }
+}

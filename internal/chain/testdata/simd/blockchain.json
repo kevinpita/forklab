@@ -1,0 +1,178 @@
+{
+  "jsonrpc": "2.0",
+  "id": -1,
+  "result": {
+    "last_height": "100",
+    "block_metas": [
+      {
+        "block_id": {
+          "hash": "F61ACEFD4C5F220D6FF7CB3C0951508AFAAF5B74F3F04A044670DA7BD746B774"
+        },
+        "block_size": "731",
+        "header": {
+          "chain_id": "mainnet-1",
+          "height": "95",
+          "time": "2026-09-29T23:04:31.599454644Z",
+          "proposer_address": "AC079252AA314DE0F9C757A267EDBBA2FDFEF873"
+        },
+        "num_txs": "0"
+      },
+      {
+        "block_id": {
+          "hash": "71953FB0C8BDEA99581548332C0756E773BC186430C5DA72F96C03A67554F325"
+        },
+        "block_size": "731",
+        "header": {
+          "chain_id": "mainnet-1",
+          "height": "94",
+          "time": "2026-09-29T23:04:30.793345109Z",
+          "proposer_address": "0A8C9CFF520EB1E9102EF239D8B6EEC91EC23141"
+        },
+        "num_txs": "0"
+      },
+      {
+        "block_id": {
+          "hash": "54CF2E2BC7B39A59CCEA7CE7583FD1F37F7111B21C98A7B6F9DA610B71FF3458"
+        },
+        "block_size": "730",
+        "header": {
+          "chain_id": "mainnet-1",
+          "height": "93",
+          "time": "2026-09-29T23:04:29.98603947Z",
+          "proposer_address": "AC079252AA314DE0F9C757A267EDBBA2FDFEF873"
+        },
+        "num_txs": "0"
+      },
+      {
+        "block_id": {
+          "hash": "C74B7FD2E0D6D535119B58533FF939C56D9071B4F14A12FD46B28859E8AF50CE"
+        },
+        "block_size": "729",
+        "header": {
+          "chain_id": "mainnet-1",
+          "height": "92",
+          "time": "2026-09-29T23:04:29.181867057Z",
+          "proposer_address": "0A8C9CFF520EB1E9102EF239D8B6EEC91EC23141"
+        },
+        "num_txs": "0"
+      },
+      {
+        "block_id": {
+          "hash": "ECAD6D817C5E81D1F82492412C36942A2F136906B274F7067EA5CF021BCF5328"
+        },
+        "block_size": "731",
+        "header": {
+          "chain_id": "mainnet-1",
+          "height": "91",
+          "time": "2026-09-29T23:04:28.37407892Z",
+          "proposer_address": "AC079252AA314DE0F9C757A267EDBBA2FDFEF873"
+        },
+        "num_txs": "0"
+      },
+      {
+        "block_id": {
+          "hash": "257F48AA40DC53EBD6956F0AC790CEC5EFF255732245DF2CA9AD30C80D75620E"
+        },
+        "block_size": "731",
+        "header": {
+          "chain_id": "mainnet-1",
+          "height": "90",
+          "time": "2026-09-29T23:04:27.567744026Z",
+          "proposer_address": "0A8C9CFF520EB1E9102EF239D8B6EEC91EC23141"
+        },
+        "num_txs": "0"
+      },
+      {
+        "block_id": {
+          "hash": "7D63307D3A8C9053532B6E7050EC8C201CDA81E8D83BC321460499F0AD27E09A"
+        },
+        "block_size": "731",
+        "header": {
+          "chain_id": "mainnet-1",
+          "height": "89",
+          "time": "2026-09-29T23:04:26.563168808Z",
+          "proposer_address": "AC079252AA314DE0F9C757A267EDBBA2FDFEF873"
+        },
+        "num_txs": "0"
+      },
+      {
+        "block_id": {
+          "hash": "B03ECBA71DABD4853F86FBD7FF00A5F3D4C5E9F0FED9C43D27DA1360355AD0B9"
+        },
+        "block_size": "733",
+        "header": {
+          "chain_id": "mainnet-1",
+          "height": "88",
+          "time": "2026-09-29T23:04:25.753928176Z",
+          "proposer_address": "0A8C9CFF520EB1E9102EF239D8B6EEC91EC23141"
+        },
+        "num_txs": "0"
+      },
+      {
+        "block_id": {
+          "hash": "1687AD4BBED06077622A883F0CDF8C436489670D33B8A6BE3101728C070A0A6B"
+        },
+        "block_size": "731",
+        "header": {
+          "chain_id": "mainnet-1",
+          "height": "87",
+          "time": "2026-09-29T23:04:20.639875915Z",
+          "proposer_address": "0A8C9CFF520EB1E9102EF239D8B6EEC91EC23141"
+        },
+        "num_txs": "0"
+      },
+      {
+        "block_id": {
+          "hash": "3AD8D37DFC445744774C0E47ADFF3E03D25A7A4A2C9776751F2C5A7FE34A5D10"
+        },
+        "block_size": "731",
+        "header": {
+          "chain_id": "mainnet-1",
+          "height": "86",
+          "time": "2026-09-29T23:04:19.838026883Z",
+          "proposer_address": "AC079252AA314DE0F9C757A267EDBBA2FDFEF873"
+        },
+        "num_txs": "0"
+      },
+      {
+        "block_id": {
+          "hash": "788ED83859F726681CBF5F3547B6A70AE51B3FA2F4F097F32AD36AB995E35D23"
+        },
+        "block_size": "728",
+        "header": {
+          "chain_id": "mainnet-1",
+          "height": "85",
+          "time": "2026-09-29T23:04:19.027784555Z",
+          "proposer_address": "0A8C9CFF520EB1E9102EF239D8B6EEC91EC23141"
+        },
+        "num_txs": "0"
+      },
+      {
+        "block_id": {
+          "hash": "64DF94E4A806D19BF0EF606FBB7714DC6539419402D7E49D144502F54C978BC0"
+        },
+        "block_size": "728",
+        "header": {
+          "chain_id": "mainnet-1",
+          "height": "84",
+          "time": "2026-09-29T23:04:18.020427008Z",
+          "proposer_address": "AC079252AA314DE0F9C757A267EDBBA2FDFEF873"
+        },
+        "num_txs": "0"
+      },
+      {
+        "block_id": {
+          "hash": "D2DE8ECD85D6ED75AF3AC0AB409525D94092F764BB3CBFBB98E587E2EA845262"
+        },
+        "block_size": "342",
+        "header": {
+          "chain_id": "mainnet-1",
+          "height": "83",
+          "time": "2026-09-29T22:03:36.6911591Z",
+          "proposer_address": "0A8C9CFF520EB1E9102EF239D8B6EEC91EC23141"
+        },
+        "num_txs": "0"
+      }
+    ]
+  }
+}

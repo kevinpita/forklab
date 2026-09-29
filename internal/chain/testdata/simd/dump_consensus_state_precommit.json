@@ -1,0 +1,133 @@
+{
+  "jsonrpc": "2.0",
+  "id": -1,
+  "result": {
+    "round_state": {
+      "height": "119",
+      "round": 0,
+      "step": 6,
+      "start_time": "2026-09-29T23:05:04.335318299Z",
+      "commit_time": "2026-09-29T23:05:03.835318299Z",
+      "validators": {
+        "validators": [
+          {
+            "address": "0A8C9CFF520EB1E9102EF239D8B6EEC91EC23141",
+            "pub_key": {
+              "type": "tendermint/PubKeyEd25519",
+              "value": "XpdqdGK4Lz0Y5GhK+Sizli43/cmH4bSk6p9u9Cf3zbA="
+            },
+            "voting_power": "135",
+            "proposer_priority": "-105"
+          },
+          {
+            "address": "AC079252AA314DE0F9C757A267EDBBA2FDFEF873",
+            "pub_key": {
+              "type": "tendermint/PubKeyEd25519",
+              "value": "BEfKP1A2X+A4MGqJyoIkKnBHMMEwp2jeTfThuT+fDPk="
+            },
+            "voting_power": "135",
+            "proposer_priority": "195"
+          },
+          {
+            "address": "BFCB14304EFC8D7A20281291D5B093F85C513457",
+            "pub_key": {
+              "type": "tendermint/PubKeyEd25519",
+              "value": "pF9UXWMZDDKG5QlLhLMYVZ25OyNrYXlOJdXZLmuO9oo="
+            },
+            "voting_power": "20",
+            "proposer_priority": "-160"
+          },
+          {
+            "address": "E941F72AAF94367307CBF197412EFD96D154B175",
+            "pub_key": {
+              "type": "tendermint/PubKeyEd25519",
+              "value": "NX/Qetfs/HqJIEFIk5XMxmxz5wbsTn/jaMymyOMV9Z8="
+            },
+            "voting_power": "10",
+            "proposer_priority": "70"
+          }
+        ],
+        "proposer": {
+          "address": "0A8C9CFF520EB1E9102EF239D8B6EEC91EC23141",
+          "pub_key": {
+            "type": "tendermint/PubKeyEd25519",
+            "value": "XpdqdGK4Lz0Y5GhK+Sizli43/cmH4bSk6p9u9Cf3zbA="
+          },
+          "voting_power": "135",
+          "proposer_priority": "-105"
+        }
+      },
+      "proposal": {
+        "Type": 32,
+        "height": "119",
+        "round": 0,
+        "pol_round": -1,
+        "block_id": {
+          "hash": "72743D7B862E8A170ACBADC1FA3D4C4D0AB66D02AE7B6D4A031313AF9BE15DF5",
+          "parts": {
+            "total": 1,
+            "hash": "CC60C3068E63CB35761BC7A152CA73948A6AD985FBADF5802C47912E564EBBB6"
+          }
+        },
+        "timestamp": "2026-09-29T23:05:04.336787261Z",
+        "signature": "LQY+IwQnogV1Rvu6BzLvtNPSAAXW5liI+c5In4wzQpr8VZL32T9kPEfdoQ29ULdYhjGNuqEedeYagx4v2t8nAg=="
+      },
+      "proposal_block": null,
+      "proposal_block_parts": null,
+      "locked_round": 0,
+      "locked_block": null,
+      "locked_block_parts": null,
+      "valid_round": 0,
+      "valid_block": null,
+      "valid_block_parts": null,
+      "votes": [
+        {
+          "round": 0,
+          "prevotes": [
+            "Vote{0:0A8C9CFF520E 119/00/SIGNED_MSG_TYPE_PREVOTE(Prevote) 72743D7B862E 28DBDB18B32C 000000000000 @ 2026-09-29T23:05:04.339817459Z}",
+            "Vote{1:AC079252AA31 119/00/SIGNED_MSG_TYPE_PREVOTE(Prevote) 72743D7B862E 4CD5A0706380 000000000000 @ 2026-09-29T23:05:04.439972892Z}",
+            "nil-Vote",
+            "nil-Vote"
+          ],
+          "prevotes_bit_array": "BA{4:xx__} 270/300 = 0.90",
+          "precommits": [
+            "nil-Vote",
+            "nil-Vote",
+            "nil-Vote",
+            "nil-Vote"
+          ],
+          "precommits_bit_array": "BA{4:____} 0/300 = 0.00"
+        },
+        {
+          "round": 1,
+          "prevotes": [
+            "nil-Vote",
+            "nil-Vote",
+            "nil-Vote",
+            "nil-Vote"
+          ],
+          "prevotes_bit_array": "BA{4:____} 0/300 = 0.00",
+          "precommits": [
+            "nil-Vote",
+            "nil-Vote",
+            "nil-Vote",
+            "nil-Vote"
+          ],
+          "precommits_bit_array": "BA{4:____} 0/300 = 0.00"
+        }
+      ],
+      "commit_round": -1,
+      "last_commit": {
+        "votes": [
+          "Vote{0:0A8C9CFF520E 118/01/SIGNED_MSG_TYPE_PRECOMMIT(Precommit) 695D9265A7B1 0D023A86C893 000000000000 @ 2026-09-29T23:05:03.833300897Z}",
+          "Vote{1:AC079252AA31 118/01/SIGNED_MSG_TYPE_PRECOMMIT(Precommit) 695D9265A7B1 E4FACC9B8D29 000000000000 @ 2026-09-29T23:05:03.734758908Z}",
+          "nil-Vote",
+          "nil-Vote"
+        ],
+        "votes_bit_array": "BA{4:xx__} 270/300 = 0.90",
+        "peer_maj_23s": {}
+      },
+      "triggered_timeout_precommit": false
+    }
+  }
+}

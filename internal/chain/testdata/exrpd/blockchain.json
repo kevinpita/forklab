@@ -1,0 +1,87 @@
+{
+  "jsonrpc": "2.0",
+  "id": -1,
+  "result": {
+    "last_height": "32",
+    "block_metas": [
+      {
+        "block_id": {
+          "hash": "157A0893197B25BE80748C64F97E84556109D6A0E94C6F8C90979F8828DADF78"
+        },
+        "block_size": "738",
+        "header": {
+          "chain_id": "xrplevm_1449999-1",
+          "height": "32",
+          "time": "2026-09-29T23:06:13.354804219Z",
+          "proposer_address": "A13EC63E611A08BECF16EF82385977E85790ED56"
+        },
+        "num_txs": "0"
+      },
+      {
+        "block_id": {
+          "hash": "A7D9D1EC676043BFB7C71D221921D3DC02B0A78FC478643FF30871F078B17A81"
+        },
+        "block_size": "739",
+        "header": {
+          "chain_id": "xrplevm_1449999-1",
+          "height": "31",
+          "time": "2026-09-29T23:06:09.336344571Z",
+          "proposer_address": "D210B47681CC1A2C2F2022E2B17A90ADC771AD66"
+        },
+        "num_txs": "0"
+      },
+      {
+        "block_id": {
+          "hash": "67B8052E47DDEE40E0039E28E12CD186407275E0A29BE179FDEEB2E91F8A0CD1"
+        },
+        "block_size": "739",
+        "header": {
+          "chain_id": "xrplevm_1449999-1",
+          "height": "30",
+          "time": "2026-09-29T23:06:05.484670545Z",
+          "proposer_address": "A13EC63E611A08BECF16EF82385977E85790ED56"
+        },
+        "num_txs": "0"
+      },
+      {
+        "block_id": {
+          "hash": "3E16E8D00A1F42D18D31789FBCB50E3873D034B2CAD3B909ED1A458DACF65CB0"
+        },
+        "block_size": "738",
+        "header": {
+          "chain_id": "xrplevm_1449999-1",
+          "height": "29",
+          "time": "2026-09-29T23:06:00.693554436Z",
+          "proposer_address": "D210B47681CC1A2C2F2022E2B17A90ADC771AD66"
+        },
+        "num_txs": "0"
+      },
+      {
+        "block_id": {
+          "hash": "68770DC18008A0BF3A80F474C87BCEF7C9D7D42146797964543831D0F3986D5D"
+        },
+        "block_size": "739",
+        "header": {
+          "chain_id": "xrplevm_1449999-1",
+          "height": "28",
+          "time": "2026-09-29T23:05:55.780115114Z",
+          "proposer_address": "A13EC63E611A08BECF16EF82385977E85790ED56"
+        },
+        "num_txs": "0"
+      },
+      {
+        "block_id": {
+          "hash": "35B682FF9EB02FA08A607B99D01848AE191C970D59C76389534C52C23C2BAA5A"
+        },
+        "block_size": "350",
+        "header": {
+          "chain_id": "xrplevm_1449999-1",
+          "height": "27",
+          "time": "2026-09-29T22:10:25.41160341Z",
+          "proposer_address": "D210B47681CC1A2C2F2022E2B17A90ADC771AD66"
+        },
+        "num_txs": "0"
+      }
+    ]
+  }
+}
