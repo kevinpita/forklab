@@ -13,7 +13,7 @@ Amounts are strings in native token units, without decimal conversion.
 
 | Command | Behavior |
 |---------|----------|
-| `runbook validate <file.yaml>` | Checks YAML fields, step structure, IDs, durations, and jq syntax without contacting a chain |
+| `runbook validate <file.yaml>` | Checks YAML fields, step structure, IDs, durations, literal store fields, and jq syntax without contacting a chain |
 | `runbook show <file.yaml>` | Prints the validated document as YAML, or as JSON with `--json` |
 | `runbook write <file.yaml> --document '<json>'` | Validates a JSON document and saves YAML, with `--force` required to replace a file |
 | `runbook run <file.yaml> --lab <name>` | Executes the recipe and saves a JSON report |
@@ -112,7 +112,7 @@ the example applies only while no node has committed beyond that height.
 
 The pause strategy supports stock Cosmos SDK 0.50 and 0.53 binaries that
 expose `--halt-height`. forklab restarts the nodes with a halt at H+1,
-before `FinalizeBlock`, and verifies that every node's committed application
+before block execution, and verifies that every node's committed application
 height is H. CometBFT's block store may already contain block H+1. That
 block store height does not mean the application committed H+1.
 

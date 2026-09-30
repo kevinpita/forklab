@@ -682,10 +682,25 @@ func execSpec(*Model) *formSpec {
 }
 
 func recipeSpec(action string) func(*Model) *formSpec {
-	return func(*Model) *formSpec {
-		return &formSpec{title: action + " runbook", show: true, fields: []fieldSpec{
+	return func(m *Model) *formSpec {
+		fields := []fieldSpec{
 			{key: "file", label: "YAML file", kind: fieldText, placeholder: "./my-test.yaml"},
-		}, build: func(v values) Command { return Command{"runbook", action, v["file"]} }}
+		}
+		if action == "run" {
+			selected, _ := m.selectedLab()
+			opts := make([]option, 0, len(m.labs))
+			for _, lab := range m.labs {
+				opts = append(opts, option{value: lab.Name, label: lab.Name})
+			}
+			fields = append(fields, fieldSpec{key: "lab", label: "Lab", kind: fieldSelect, def: selected.Name, options: opts})
+		}
+		return &formSpec{title: action + " runbook", show: true, fields: fields, build: func(v values) Command {
+			c := Command{"runbook", action, v["file"]}
+			if action == "run" {
+				c = append(c, "--lab", v["lab"])
+			}
+			return c
+		}}
 	}
 }
 

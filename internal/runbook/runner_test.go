@@ -257,3 +257,22 @@ func TestScriptJSONPreservesLargeNumbers(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestInvalidLiteralStoresFailBeforeEarlierTransactions(t *testing.T) {
+	for _, request := range []chain.StoreRequest{
+		{Name: "bank", KeyHex: "not-hex"},
+		{Name: "bank/invalid", KeyHex: "{{ .vars.key }}"},
+		{Name: "{{ .vars.store }}", KeyHex: "not-hex"},
+		{Name: "{{ .vars.store }}", KeyHex: "{{ .vars.key }}", Height: -1},
+	} {
+		f := &fakeRuntime{}
+		doc := Document{Version: 1, Steps: []Step{{Tx: &Tx{From: "val0", Args: []string{"bank", "send"}}}, {Store: &request}}}
+		if _, err := (Runner{Runtime: f}).Run(context.Background(), doc); err == nil || len(f.calls) != 0 {
+			t.Fatalf("request=%+v err=%v earlier calls=%v", request, err, f.calls)
+		}
+	}
+	doc := Document{Version: 1, Vars: map[string]any{"store": "bank", "key": "00"}, Steps: []Step{{ID: "raw", Store: &chain.StoreRequest{Name: "{{ .vars.store }}", KeyHex: "{{ .vars.key }}"}}, {Assert: `.steps.raw.key_hex == "00"`}}}
+	if _, err := (Runner{Runtime: &fakeRuntime{}}).Run(context.Background(), doc); err != nil {
+		t.Fatalf("valid templates rejected: %v", err)
+	}
+}

@@ -20,7 +20,7 @@ type HaltStrategy interface {
 }
 
 // SDKFinalizeHalt supports SDK 0.50 and 0.53: halt-height is checked
-// before FinalizeBlock, and CometBFT keeps serving queries after the failure.
+// before block execution, and CometBFT keeps serving queries after the failure.
 // Older SDKs terminate the process at Commit and need a different strategy.
 type SDKFinalizeHalt struct{}
 
