@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -49,6 +50,8 @@ func (m *Model) render() string {
 		body = overlay(body, m.previewView(), m.w)
 	case overlayConfirm:
 		body = overlay(body, m.confirmView(), m.w)
+	case overlayForm:
+		body = overlay(body, m.formView(), m.w)
 	}
 	lines = append(lines, body...)
 	lines = append(lines, m.statusLine(), m.footer())
@@ -89,14 +92,18 @@ func (m *Model) header() string {
 	sep := th.Border.Render(" │ ")
 	s := m.status
 	if s == nil {
-		msg := "no lab running"
-		if err := m.streams[streamStatus].err; err != nil {
-			msg = oneLine(err.Error())
+		var msg string
+		switch {
+		case m.chainSilent():
+			msg = "Chain not answering, see the status line"
+		case m.labPhase() == phaseRunning || m.labStarting():
+			msg = "Starting the chain…"
+		case m.labPhase() == phaseUnknown:
+			msg = "loading"
+		default:
+			msg = m.labHint()
 		}
 		parts = append(parts, " "+th.Warn.Render("○ "+msg))
-		if l, ok := m.selectedLab(); ok && !l.Running {
-			parts = append(parts, th.Dim.Render("  [6] Labs, u to start "+l.Name))
-		}
 		return strings.Join(parts, "")
 	}
 	// Chips in display order, each with a priority; the least important
@@ -205,18 +212,20 @@ func (m *Model) leftHeights(total int) []int {
 	}
 	hs[m.panel] = 3
 	grow := func(p panelID, to int) {
-		if extra := to - hs[p]; extra > 0 && sum+extra <= total {
+		extra := min(to-hs[p], total-sum)
+		if extra > 0 {
 			hs[p] += extra
 			sum += extra
 		}
 	}
 	need := func(p panelID) int { return max(panels[p].count(m), 1) + 2 }
+	// The focused panel lists all it can first; the rest share what is left.
+	grow(m.panel, need(m.panel))
 	for p := range numPanels {
 		if p != m.panel {
 			grow(p, min(need(p), 5))
 		}
 	}
-	grow(m.panel, need(m.panel))
 	for p := range numPanels {
 		grow(p, need(p))
 	}
@@ -261,22 +270,52 @@ func (m *Model) panelEmpty(p panelID) string {
 		panelNodes: loadNodes, panelProposals: loadProposals, panelUpgrades: loadUpgrade, panelAccounts: loadAccounts,
 		panelLabs: loadLabs, panelProfiles: loadProfiles, panelBinaries: loadBinaries,
 	}
-	if p == panelConsensus && m.streams[streamConsensus].err != nil {
-		return "chain not answering"
-	}
-	if p == panelConsensus {
+	if p == panelConsensus && m.labPhase() == phaseRunning {
+		if m.streams[streamConsensus].err != nil {
+			return "chain not answering"
+		}
 		return "waiting for the chain"
 	}
-	if err := m.loads[k[p]].err; err != nil {
-		if isLabNotRunning(err) {
-			return "no lab running"
-		}
-		return "error, see main pane"
+	if err := m.loads[k[p]].err; err != nil && !m.explained(k[p], err) {
+		return "failed to load"
 	}
-	if p != panelLabs && p != panelProfiles && p != panelBinaries && m.status == nil {
-		return "no lab running"
+	switch p {
+	case panelLabs:
+		if m.labPhase() == phaseNoLab {
+			return "none yet, n creates one"
+		}
+	case panelProfiles:
+		return "none, n creates one"
+	case panelBinaries:
+		return "none cached, f fetches one"
+	default:
+		switch m.labPhase() {
+		case phaseNoLab:
+			return "no lab yet, n creates one"
+		case phaseStopped:
+			return "lab stopped, u starts it"
+		}
+		if m.status == nil {
+			return "waiting for the chain"
+		}
 	}
 	return "none"
+}
+
+// labHint is what a panel about the chain says while no lab runs.
+func (m *Model) labHint() string {
+	switch m.labPhase() {
+	case phaseNoLab:
+		return "No lab yet. Press n to create one"
+	case phaseStopped:
+		if l, ok := m.selectedLab(); ok {
+			return "Lab " + l.Name + " is stopped. Press u to start it"
+		}
+		return "No lab running. Pick one in [6] Labs and press u"
+	case phaseUnknown:
+		return "loading…"
+	}
+	return "waiting for the chain…"
 }
 
 func (m *Model) listLine(r listRow, w int, selected, focused bool) string {
@@ -431,10 +470,17 @@ func (m *Model) quitNote() string {
 
 func (m *Model) statusLine() string {
 	th := m.th
+	if err := m.streams[streamStatus].err; err != nil && len(m.running) == 0 && m.chainSilent() {
+		return th.FooterKey.Render(" $ ") + th.Text.Render(Command{"status", "-w"}.String()) + "  " + th.Error.Render("✗ "+oneLine(err.Error()))
+	}
 	if len(m.running) > 0 {
-		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-		c := m.running[len(m.running)-1]
-		return th.Val.Render(frames[m.spin%len(frames)]) + " " + th.FooterKey.Render("$ ") + th.Text.Render(c.String()) + m.quitNote()
+		r := m.running[len(m.running)-1]
+		took := th.Dim.Render(" " + fmtDur(time.Since(r.at).Round(time.Second)))
+		more := ""
+		if n := len(m.running) - 1; n > 0 {
+			more = th.Dim.Render(fmt.Sprintf(" +%d more", n))
+		}
+		return th.Val.Render(spinFrame(m.spin)) + " " + th.FooterKey.Render("$ ") + th.Text.Render(r.cmd.String()) + took + more + m.quitNote()
 	}
 	if m.last == nil {
 		return th.Dim.Render(" $ ready · every action runs a forklab command, c shows them")
@@ -447,11 +493,18 @@ func (m *Model) statusLine() string {
 	} else {
 		right = th.StatusOK.Render("✓ ok") + th.Dim.Render(" "+fmtTook(r))
 	}
-	gap := m.w - ansi.StringWidth(left) - ansi.StringWidth(right) - 1
-	if gap < 2 {
-		return left + "  " + right
+	// A long command gives way so the outcome always shows.
+	room := m.w - ansi.StringWidth(right) - 3
+	if ansi.StringWidth(left) > room {
+		left = ansi.Truncate(left, max(room, 0), "…")
 	}
+	gap := max(m.w-ansi.StringWidth(left)-ansi.StringWidth(right)-1, 2)
 	return left + strings.Repeat(" ", gap) + right
+}
+
+func spinFrame(i int) string {
+	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	return frames[i%len(frames)]
 }
 
 func fmtTook(r *Result) string {
@@ -467,16 +520,32 @@ func fmtTook(r *Result) string {
 func (m *Model) footer() string {
 	th := m.th
 	var parts []string
+	help := ""
 	for _, b := range m.footerBindings() {
-		parts = append(parts, th.FooterKey.Render(b.footerKey())+" "+th.FooterDesc.Render(b.hint))
+		hint := th.FooterKey.Render(b.footerKey()) + " " + th.FooterDesc.Render(b.hint)
+		if b.id == actHelp {
+			help = hint
+			continue
+		}
+		parts = append(parts, hint)
+	}
+	if help != "" {
+		parts = append(parts, help)
 	}
 	out := " " + strings.Join(parts, "  ")
-	if ansi.StringWidth(out) > m.w && m.overlay == overlayNone {
-		// Keep help reachable when the hints do not fit.
-		tail := "  " + th.FooterKey.Render("?") + " " + th.FooterDesc.Render("help")
-		out = ansi.Truncate(out, max(m.w-ansi.StringWidth(tail), 0), "…") + tail
+	if ansi.StringWidth(out) <= m.w || help == "" {
+		return out
 	}
-	return out
+	// Whole hints that fit, then help, which stays reachable.
+	room := m.w - ansi.StringWidth(help) - 5
+	out = ""
+	for _, p := range parts[:len(parts)-1] {
+		if ansi.StringWidth(out)+2+ansi.StringWidth(p) > room {
+			break
+		}
+		out += "  " + p
+	}
+	return strings.TrimPrefix(out, " ") + "  … " + help
 }
 
 // overlay splices the modal into the middle of body.
@@ -563,7 +632,7 @@ func (m *Model) paletteItems() []paletteItem {
 	q := strings.TrimSpace(m.input.Value())
 	if rest, ok := strings.CutPrefix(q, "forklab"); ok && (rest == "" || rest[0] == ' ') {
 		args, err := splitArgs(rest)
-		if err != nil || len(args) == 0 {
+		if err != nil || len(args) == 0 || !knownCommand(args) {
 			return nil
 		}
 		args = withoutJSON(args)
@@ -576,14 +645,17 @@ func (m *Model) paletteItems() []paletteItem {
 			label = panels[p].title + ": " + label
 		}
 		it := paletteItem{label: label, detail: keyLabel(b.keys), b: b}
-		if b.cmd != nil {
+		switch {
+		case b.form != nil:
+			it.detail += "  form: " + b.command(m).String()
+		case b.cmd != nil:
 			it.detail += "  " + b.cmd(m).String()
 		}
 		items = append(items, it)
 	}
 	items = fuzzyRank(items, q, func(it paletteItem) string { return it.label })
 	if q != "" {
-		if args, err := splitArgs(q); err == nil {
+		if args, err := splitArgs(q); err == nil && knownCommand(args) {
 			args = withoutJSON(args)
 			items = append(items, paletteItem{label: "Run", detail: Command(args).String(), raw: args})
 		}
@@ -646,7 +718,7 @@ func (m *Model) previewItems() []previewItem {
 		items[1].cmd = m.output.Cmd
 	}
 	for _, b := range m.activeCommands() {
-		items = append(items, previewItem{label: b.keys[0] + " " + strings.ToLower(b.name), cmd: b.cmd(m), b: &b})
+		items = append(items, previewItem{label: b.keys[0] + " " + strings.ToLower(b.name), cmd: b.command(m), b: &b})
 	}
 	return items
 }
@@ -657,15 +729,30 @@ func (m *Model) previewView() []string {
 	w := min(max(m.w*2/3, 44), 96)
 	var lines []string
 	cur := min(m.preview, len(items)-1)
+	// A long label takes its own line and a long command wraps, so no
+	// command is cut short.
+	const indent = 18
 	for i, it := range items {
-		line := " " + padRight(it.label, 14) + " $ " + it.cmd.String()
-		switch {
-		case i == cur:
-			lines = append(lines, th.Sel.Render(fit(line, w-2)))
-		case it.b == nil:
-			lines = append(lines, th.Dim.Render(line))
-		default:
-			lines = append(lines, " "+th.FooterKey.Render(padRight(it.label, 14))+th.FooterKey.Render(" $ ")+th.Val.Render(it.cmd.String()))
+		label := " " + padRight(it.label, 14) + " "
+		var rows []string
+		if ansi.StringWidth(label) > indent {
+			rows, label = append(rows, label), strings.Repeat(" ", indent-1)
+		}
+		for j, part := range wrapWords("$ "+it.cmd.String(), max(w-3-indent, 8)) {
+			if j > 0 {
+				label, part = strings.Repeat(" ", indent-1), "  "+part
+			}
+			rows = append(rows, label+part)
+		}
+		for _, r := range rows {
+			switch {
+			case i == cur:
+				lines = append(lines, th.Sel.Render(fit(r, w-2)))
+			case it.b == nil:
+				lines = append(lines, th.Dim.Render(r))
+			default:
+				lines = append(lines, th.FooterKey.Render(r))
+			}
 		}
 	}
 	lines = append(lines, "", th.Dim.Render(" every screen and action is one of these commands; enter runs an action"))
@@ -694,6 +781,33 @@ func (m *Model) confirmView() []string {
 		w = max(w, ansi.StringWidth(l))
 	}
 	return m.modal("Confirm", "", lines, w+4)
+}
+
+// wrapWords breaks s at spaces into lines of at most w cells, so a flag
+// such as --json never splits; only a word longer than w is cut.
+func wrapWords(s string, w int) []string {
+	var out []string
+	line := ""
+	var words []string
+	for _, word := range strings.Split(s, " ") {
+		for ansi.StringWidth(word) > w {
+			words = append(words, ansi.Truncate(word, w, ""))
+			word = ansi.TruncateLeft(word, w, "")
+		}
+		words = append(words, word)
+	}
+	for _, word := range words {
+		switch {
+		case line == "":
+			line = word
+		case ansi.StringWidth(line)+1+ansi.StringWidth(word) <= w:
+			line += " " + word
+		default:
+			out = append(out, line)
+			line = word
+		}
+	}
+	return append(out, line)
 }
 
 // oneLine collapses a possibly multi-line message to one line of single

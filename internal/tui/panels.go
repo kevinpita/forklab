@@ -84,14 +84,17 @@ func init() {
 				}
 				return Command{"gov", "list"}
 			},
+			keys: scopeProposals, hasKeys: true,
 		},
 		panelUpgrades: {
 			title: "Upgrades", rows: upgradeRows, summary: upgradeSummary, main: upgradeMain,
 			view: func(*Model) Command { return Command{"upgrade", "status"} },
+			keys: scopeUpgrades, hasKeys: true,
 		},
 		panelAccounts: {
 			title: "Accounts", rows: accountRows, summary: countSummary(func(m *Model) int { return len(m.accounts) }), main: accountMain,
 			view: func(*Model) Command { return Command{"account", "list"} },
+			keys: scopeAccounts, hasKeys: true,
 		},
 		panelLabs: {
 			title: "Labs", rows: labRows, summary: countSummary(func(m *Model) int { return len(m.labs) }), main: labMain,
@@ -108,10 +111,12 @@ func init() {
 				}
 				return Command{"profile", "list"}
 			},
+			keys: scopeProfiles, hasKeys: true,
 		},
 		panelBinaries: {
 			title: "Binaries", rows: binaryRows, summary: countSummary(func(m *Model) int { return len(m.binaries) }), main: binaryMain,
 			view: func(*Model) Command { return Command{"binary", "list"} },
+			keys: scopeBinaries, hasKeys: true,
 		},
 	}
 }
@@ -206,7 +211,7 @@ func nodeSummary(m *Model) string {
 func nodeMain(m *Model, w, h int) mainView {
 	n, ok := m.selectedNode()
 	if !ok {
-		return mainView{title: "Node", lines: m.emptyHint(loadNodes, "no nodes: start a lab from [6] Labs")}
+		return mainView{title: "Node", lines: m.emptyHint(loadNodes, "no nodes")}
 	}
 	th := m.th
 	g, st, state := m.nodeState(n)
@@ -595,7 +600,7 @@ func upgradeMain(m *Model, _, _ int) mainView {
 		lines = append(lines, th.Warn.Render("! "+w))
 	}
 	if m.plan() == nil && u.Pending == nil {
-		lines = append(lines, "", th.Dim.Render("schedule one with: ")+th.Val.Render("forklab upgrade schedule <version> --in 20"))
+		lines = append(lines, "", th.Dim.Render("press u to schedule one"))
 	}
 	return mainView{title: "Upgrades", right: th.Dim.Render(upgradeSummary(m)), lines: lines}
 }
@@ -656,7 +661,7 @@ func labMain(m *Model, _, _ int) mainView {
 	l, ok := m.selectedLab()
 	th := m.th
 	if !ok {
-		return mainView{title: "Lab", lines: m.emptyHint(loadLabs, "no labs: forklab lab create <name> --profile <p> --version <v>")}
+		return mainView{title: "Lab", lines: m.emptyHint(loadLabs, "No lab yet. Press n to create one")}
 	}
 	state := th.Dim.Render("○ stopped")
 	if l.Running {
@@ -713,7 +718,7 @@ func profileMain(m *Model, _, _ int) mainView {
 	p, ok := m.selectedProfile()
 	th := m.th
 	if !ok {
-		return mainView{title: "Profile", lines: m.emptyHint(loadProfiles, "no profiles")}
+		return mainView{title: "Profile", lines: m.emptyHint(loadProfiles, "No profiles. Press n to create one")}
 	}
 	lines := []string{th.Title.Render(p.Name) + "  " + th.Dim.Render(p.Origin)}
 	if p.Path != "" {
@@ -799,7 +804,7 @@ func binaryMain(m *Model, _, _ int) mainView {
 	b, ok := pick(m.binaries, m.cursor[panelBinaries])
 	th := m.th
 	if !ok {
-		return mainView{title: "Binary", lines: m.emptyHint(loadBinaries, "no cached binaries: forklab binary fetch <version> --profile <p>")}
+		return mainView{title: "Binary", lines: m.emptyHint(loadBinaries, "No binaries cached yet. Press f to fetch one")}
 	}
 	lines := []string{
 		th.Title.Render(b.Profile+" "+b.Version) + "  " + th.Dim.Render(b.Kind),
@@ -816,10 +821,22 @@ func binaryMain(m *Model, _, _ int) mainView {
 	return mainView{title: "Binary " + b.Version, right: th.Dim.Render(b.Profile), lines: lines}
 }
 
-// emptyHint explains an empty panel: the load error when there is one.
+// emptyHint explains an empty panel. While no lab runs, a panel about the
+// chain says what to do next; an error the lab's state does not explain is
+// in the status line, so the panel only points there.
 func (m *Model) emptyHint(k loadKind, empty string) []string {
+	chain := k != loadLabs && k != loadProfiles && k != loadProfile && k != loadBinaries
+	if chain && m.labPhase() != phaseRunning {
+		return []string{m.th.Text.Render(m.labHint())}
+	}
 	if err := m.loads[k].err; err != nil {
-		return []string{m.th.Bad.Render(oneLine(err.Error()))}
+		if m.explained(k, err) {
+			return []string{m.th.Dim.Render(m.labHint())}
+		}
+		return []string{m.th.Bad.Render("Could not load this; the error is in the status line. ctrl+r retries.")}
+	}
+	if chain && k != loadNodes && !m.chainUp() {
+		return []string{m.th.Dim.Render("waiting for the chain…")}
 	}
 	if m.loads[k].seq == 0 || m.loads[k].inflight && m.loads[k].seq == 1 {
 		return []string{m.th.Dim.Render("loading…")}
@@ -828,8 +845,14 @@ func (m *Model) emptyHint(k loadKind, empty string) []string {
 }
 
 func (m *Model) streamHint(k streamKind) []string {
+	if m.labPhase() != phaseRunning {
+		return []string{m.th.Text.Render(m.labHint())}
+	}
 	if err := m.streams[k].err; err != nil {
-		return []string{m.th.Bad.Render(oneLine(err.Error()))}
+		if m.chainSilent() {
+			return []string{m.th.Warn.Render("The chain is not answering; the error is in the status line.")}
+		}
+		return []string{m.th.Dim.Render("Starting the chain…")}
 	}
 	return []string{m.th.Dim.Render("waiting for the chain…")}
 }

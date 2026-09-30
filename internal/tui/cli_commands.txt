@@ -1,0 +1,36 @@
+account list
+account send
+binary build
+binary fetch
+binary list
+consensus
+exec
+gov list
+gov show
+gov submit
+gov vote
+lab create
+lab delete
+lab down
+lab list
+lab reset
+lab show
+lab up
+node kill
+node list
+node logs
+node restart
+node start
+node stop
+profile create
+profile delete
+profile edit
+profile list
+profile show
+profile validate
+status
+tui
+upgrade cancel
+upgrade schedule
+upgrade status
+version

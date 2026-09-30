@@ -31,6 +31,7 @@ const (
 	overlayPalette
 	overlayPreview
 	overlayConfirm
+	overlayForm
 )
 
 // loadKind names one polled query. Each has its own sequence so a slow
@@ -91,6 +92,8 @@ type Model struct {
 	input    textinput.Model
 	preview  int
 	pending  *pendingRun
+	form     *form
+	formSeq  int
 	quitting bool
 	spinning bool
 	spin     int
@@ -112,8 +115,18 @@ type Model struct {
 	profile   *profileInfo
 	binaries  []binaryInfo
 	logs      logBuffer
+	// labsKnown is true while the last lab list loaded; until then no
+	// panel can tell a missing lab from a slow one.
+	labsKnown bool
+	// wizardOffered is set once the first-lab wizard opened; it opens by
+	// itself once per session, and n reopens it.
+	wizardOffered bool
+	// streamLab is the running lab the chain streams were last pointed at.
+	streamLab string
+	// quietSince is when a running lab's chain last stopped answering.
+	quietSince time.Time
 
-	running []Command
+	running []runningCmd
 	last    *Result
 	// output is the result of a command run from the palette, shown in the
 	// main pane until the user moves on.
@@ -124,11 +137,17 @@ type paletteState struct {
 	cursor int
 }
 
+type runningCmd struct {
+	cmd Command
+	at  time.Time
+}
+
 // pendingRun is an action waiting in the confirm overlay.
 type pendingRun struct {
 	cmd    Command
 	prompt string
 	danger bool
+	show   bool
 }
 
 type (
@@ -168,17 +187,45 @@ func tick() tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd := m.update(msg)
 	m.clampScroll()
+	if m.status != nil || (m.labPhase() != phaseRunning && !m.labStarting()) {
+		m.quietSince = time.Time{}
+	} else if m.quietSince.IsZero() {
+		m.quietSince = time.Now()
+	}
 	return m, cmd
+}
+
+// startGrace is how long a lab may take to answer before the header calls
+// it silent; a fresh lab needs a few blocks first.
+const startGrace = 45 * time.Second
+
+// chainSilent is true once a running lab has not answered for startGrace.
+func (m *Model) chainSilent() bool {
+	return !m.quietSince.IsZero() && time.Since(m.quietSince) > startGrace && m.streams[streamStatus].err != nil
+}
+
+// labStarting is true while a lab up runs.
+func (m *Model) labStarting() bool {
+	for _, r := range m.running {
+		if len(r.cmd) > 1 && r.cmd[0] == "lab" && r.cmd[1] == "up" {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
+		m.sizeForm()
 		return nil
 	case tea.KeyPressMsg:
 		return m.key(msg)
 	case tea.PasteMsg:
+		if m.overlay == overlayForm {
+			return m.formKey(msg)
+		}
 		if m.overlay == overlayPalette {
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
@@ -199,6 +246,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.applyLoad(msg)
 	case actionMsg:
 		return m.applyAction(msg)
+	case formOptionsMsg:
+		return m.applyFormOptions(msg)
 	case streamEvent:
 		return m.applyStream(msg)
 	case restartMsg:
@@ -216,6 +265,9 @@ func (m *Model) key(msg tea.KeyPressMsg) tea.Cmd {
 	key := msg.String()
 	b, ok := m.match(key)
 	if !ok {
+		if m.overlay == overlayForm {
+			return m.formKey(msg)
+		}
 		if m.overlay == overlayPalette {
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
@@ -224,10 +276,27 @@ func (m *Model) key(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 	}
-	if b.cmd != nil {
+	return m.trigger(b)
+}
+
+// trigger does what b does: runs its command, opens its form, or calls
+// its handler.
+func (m *Model) trigger(b binding) tea.Cmd {
+	switch {
+	case b.cmd != nil:
 		return m.request(b)
+	case b.form != nil:
+		return m.openForm(b.form(m))
 	}
 	return handlers[b.id](m)
+}
+
+func (m *Model) closeOverlay() tea.Cmd {
+	if m.overlay == overlayForm {
+		return m.closeForm()
+	}
+	m.overlay = overlayNone
+	return nil
 }
 
 func (m *Model) quit() tea.Cmd {
@@ -257,11 +326,7 @@ func (m *Model) openPalette(query string) {
 }
 
 func (m *Model) back() tea.Cmd {
-	if m.output != nil {
-		m.output = nil
-		return nil
-	}
-	m.focus = focusList
+	m.output, m.focus = nil, focusList
 	return nil
 }
 
@@ -336,10 +401,7 @@ func (m *Model) overlayRun() tea.Cmd {
 		if p, ok := panelOf(it.b.scope); ok && p != m.panel {
 			show = m.setPanel(p)
 		}
-		if it.b.cmd != nil {
-			return tea.Batch(show, m.request(it.b))
-		}
-		return tea.Batch(show, handlers[it.b.id](m))
+		return tea.Batch(show, m.trigger(it.b))
 	case overlayPreview:
 		items := m.previewItems()
 		if len(items) == 0 {
@@ -350,7 +412,7 @@ func (m *Model) overlayRun() tea.Cmd {
 		if it.b == nil {
 			return nil
 		}
-		return m.request(*it.b)
+		return m.trigger(*it.b)
 	}
 	return nil
 }
@@ -360,11 +422,11 @@ func (m *Model) overlayRun() tea.Cmd {
 func (m *Model) request(b binding) tea.Cmd {
 	c := b.cmd(m)
 	if b.confirm != "" {
-		m.pending = &pendingRun{cmd: c, prompt: fmt.Sprintf(b.confirm, m.selectionName()), danger: b.danger}
+		m.pending = &pendingRun{cmd: c, prompt: fmt.Sprintf(b.confirm, m.selectionName()), danger: b.danger, show: b.show}
 		m.openOverlay(overlayConfirm)
 		return nil
 	}
-	return m.exec(c, false)
+	return m.exec(c, b.show)
 }
 
 func (m *Model) confirmRun() tea.Cmd {
@@ -373,7 +435,7 @@ func (m *Model) confirmRun() tea.Cmd {
 	if p == nil {
 		return nil
 	}
-	return m.exec(p.cmd, false)
+	return m.exec(p.cmd, p.show)
 }
 
 // runRaw runs a command typed into the palette. Streaming flags are refused
@@ -401,7 +463,7 @@ func streams(a string) bool {
 }
 
 func (m *Model) exec(c Command, show bool) tea.Cmd {
-	m.running = append(m.running, c)
+	m.running = append(m.running, runningCmd{cmd: c, at: time.Now()})
 	// Actions outlive a canceled context so a quit never kills one half done.
 	run, ctx := m.run, context.WithoutCancel(m.ctx)
 	cmds := []tea.Cmd{func() tea.Msg { return actionMsg{res: run.Run(ctx, c), show: show} }}
@@ -417,14 +479,15 @@ func spinTick() tea.Cmd {
 }
 
 func (m *Model) applyAction(msg actionMsg) tea.Cmd {
-	for i, c := range m.running {
-		if c.String() == msg.res.Cmd.String() {
+	for i, r := range m.running {
+		if r.cmd.String() == msg.res.Cmd.String() {
 			m.running = append(m.running[:i:i], m.running[i+1:]...)
 			break
 		}
 	}
 	res := msg.res
 	m.last = &res
+	m.formDone(res)
 	if m.quitting && len(m.running) == 0 {
 		return m.quit()
 	}
@@ -510,10 +573,17 @@ func (m *Model) applyLoad(msg resultMsg) tea.Cmd {
 	if msg.seq != st.seq {
 		return nil
 	}
+	prev := st.err
 	st.inflight, st.err = false, msg.res.Err
 	if msg.res.Err != nil {
-		// A failed query shows its error, never the last answer as if current.
+		// A failed query shows no data, never the last answer as if current.
+		// An error the lab's state explains gets friendly text in the panel;
+		// any other one goes to the status line once, when it first appears.
 		m.clearLoad(msg.kind)
+		if !m.explained(msg.kind, msg.res.Err) && (prev == nil || prev.Error() != msg.res.Err.Error()) {
+			res := msg.res
+			m.last = &res
+		}
 		m.clampCursors()
 		return m.followLogs()
 	}
@@ -534,6 +604,8 @@ func (m *Model) applyLoad(msg resultMsg) tea.Cmd {
 		err = decodeInto(data, &m.accounts)
 	case loadLabs:
 		err = decodeInto(data, &m.labs)
+		m.labsKnown = err == nil
+		m.followRunningLab()
 	case loadProfiles:
 		err = decodeInto(data, &m.profiles)
 	case loadProfile:
@@ -544,7 +616,82 @@ func (m *Model) applyLoad(msg resultMsg) tea.Cmd {
 	}
 	st.err = err
 	m.clampCursors()
-	return m.followLogs()
+	return tea.Batch(m.followLogs(), m.offerWizard())
+}
+
+// followRunningLab restarts the chain streams when another lab starts
+// running: a stream resolves its lab once, and a new lab reuses the ports
+// of the old one, so an old stream would show the new chain as the old lab.
+func (m *Model) followRunningLab() {
+	running := ""
+	for _, l := range m.labs {
+		if l.Running {
+			running = l.Name
+		}
+	}
+	if running == m.streamLab {
+		return
+	}
+	m.streamLab = running
+	if running == "" || (m.status != nil && m.status.Lab == running) {
+		return
+	}
+	m.setStatus(nil)
+	m.consensus = nil
+	m.startStream(streamStatus, "")
+	m.startStream(streamConsensus, "")
+}
+
+// offerWizard opens the first-lab wizard the first time the lab list turns
+// out empty while nothing else holds the screen. Later an empty list shows
+// the empty state, so deleting the last lab never traps the user in it.
+func (m *Model) offerWizard() tea.Cmd {
+	if m.labPhase() != phaseNoLab || m.wizardOffered || m.overlay != overlayNone {
+		return nil
+	}
+	m.wizardOffered = true
+	return m.openForm(labCreateSpec(m, true))
+}
+
+// labPhase is what the TUI knows about labs: whether any exist and run.
+type labPhase int
+
+const (
+	phaseUnknown labPhase = iota
+	phaseNoLab
+	phaseStopped
+	phaseRunning
+)
+
+func (m *Model) labPhase() labPhase {
+	switch {
+	case !m.labsKnown:
+		return phaseUnknown
+	case len(m.labs) == 0:
+		return phaseNoLab
+	}
+	for _, l := range m.labs {
+		if l.Running {
+			return phaseRunning
+		}
+	}
+	return phaseStopped
+}
+
+// explained reports whether the lab's state accounts for a failed query:
+// the queries about a lab fail while none exists or runs. The TUI's own
+// queries are well formed, so a usage error from one means it found no lab
+// to ask, as when a lab stops before the lab list says so.
+func (m *Model) explained(k loadKind, err error) bool {
+	if isLabNotRunning(err) {
+		return true
+	}
+	switch k {
+	case loadNodes, loadProposals, loadProposal, loadUpgrade, loadAccounts:
+		var ce *CLIError
+		return m.labPhase() != phaseRunning || errors.As(err, &ce) && ce.Code == "usage"
+	}
+	return false
 }
 
 func decodeInto[T any](data json.RawMessage, dst *[]T) error {
@@ -674,7 +821,7 @@ func (m *Model) clearLoad(k loadKind) {
 	case loadAccounts:
 		m.accounts = nil
 	case loadLabs:
-		m.labs = nil
+		m.labs, m.labsKnown = nil, false
 	case loadProfiles:
 		m.profiles = nil
 	case loadProfile:
@@ -748,6 +895,13 @@ func (m *Model) selectionName() string {
 	case panelLabs:
 		l, _ := m.selectedLab()
 		return l.Name
+	case panelProfiles:
+		p, _ := m.selectedProfile()
+		return p.Name
+	case panelUpgrades:
+		if p := m.plan(); p != nil {
+			return p.Name
+		}
 	}
 	return ""
 }

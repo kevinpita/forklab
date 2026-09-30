@@ -26,8 +26,14 @@ func TestCatalogKeysAreUniquePerScope(t *testing.T) {
 func TestEveryBindingDoesExactlyOneThing(t *testing.T) {
 	for _, b := range catalog {
 		_, hasHandler := handlers[b.id]
-		if hasHandler == (b.cmd != nil) {
-			t.Errorf("%q (action %d): handler %v, command %v; want exactly one", b.name, b.id, hasHandler, b.cmd != nil)
+		n := 0
+		for _, does := range []bool{hasHandler, b.cmd != nil, b.form != nil} {
+			if does {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("%q (action %d): handler %v, command %v, form %v; want exactly one", b.name, b.id, hasHandler, b.cmd != nil, b.form != nil)
 		}
 		if len(b.keys) == 0 || b.name == "" {
 			t.Errorf("action %d has no key or name", b.id)
@@ -38,16 +44,16 @@ func TestEveryBindingDoesExactlyOneThing(t *testing.T) {
 	}
 }
 
-// Every palette entry, in every panel, must be runnable: it has a handler
-// or a command, and a command renders as a forklab invocation.
+// Every palette entry, in every panel, must be runnable: it has a handler,
+// or a command or form that renders as a forklab invocation.
 func TestPaletteEntriesAreRunnable(t *testing.T) {
 	m := loadedModel(t, buildTheme("ansi", true))
 	m.w, m.h = 120, 40
 	for p := range numPanels {
 		m.panel = p
 		for _, b := range m.paletteEntries() {
-			if b.cmd != nil {
-				if c := b.cmd(m); len(c) == 0 || c.String()[:8] != "forklab " {
+			if b.cmd != nil || b.form != nil {
+				if c := b.command(m); len(c) == 0 || c.String()[:8] != "forklab " {
 					t.Errorf("%s: %q builds %q", panels[p].title, b.name, c)
 				}
 				continue

@@ -53,6 +53,31 @@ const (
 	actOverlayUp
 	actOverlayDown
 	actRun
+	actFirstLab
+	actStartLab
+	actVersion
+	actExec
+	actLabNew
+	actLabReset
+	actLabDelete
+	actLabMnemonics
+	actNodeRestartOn
+	actUpgradeSchedule
+	actUpgradeCancel
+	actSend
+	actProposalNew
+	actProposalVote
+	actProfileNew
+	actProfileEdit
+	actProfileDelete
+	actProfileValidate
+	actBinaryFetch
+	actBinaryBuild
+	actFormNext
+	actFormPrev
+	actFormSubmit
+	actFormLeft
+	actFormRight
 )
 
 // scope is where a binding applies. Overlays own the keyboard while open;
@@ -66,15 +91,21 @@ const (
 	scopeMain
 	scopeNodes
 	scopeLabs
+	scopeProposals
+	scopeUpgrades
+	scopeAccounts
+	scopeProfiles
+	scopeBinaries
 	scopeHelp
 	scopePalette
 	scopePreview
 	scopeConfirm
+	scopeForm
 )
 
 var scopeTitles = map[scope]string{
-	scopeGlobal: "Global", scopeList: "Panel list", scopeMain: "Main pane", scopeNodes: "Nodes", scopeLabs: "Labs",
-	scopeHelp: "Help", scopePalette: "Palette", scopePreview: "Command preview", scopeConfirm: "Confirm",
+	scopeGlobal: "Global", scopeList: "Panel list", scopeMain: "Main pane", scopeHelp: "Help", scopePalette: "Palette",
+	scopePreview: "Command preview", scopeConfirm: "Confirm", scopeForm: "Form",
 }
 
 type binding struct {
@@ -96,6 +127,10 @@ type binding struct {
 	// confirm asks before running cmd; danger colors the prompt red.
 	confirm string
 	danger  bool
+	// show puts cmd's result in the main pane.
+	show bool
+	// form opens a form that builds the command instead.
+	form func(*Model) *formSpec
 }
 
 func bind(id action, sc scope, name string, keys ...string) binding {
@@ -136,7 +171,26 @@ func (b binding) runs(fn func(*Model) Command, confirm string, danger bool) bind
 	return b
 }
 
+func (b binding) shows() binding {
+	b.show = true
+	return b
+}
+
+func (b binding) opens(fn func(*Model) *formSpec) binding {
+	b.form, b.palette = fn, true
+	return b
+}
+
 func (b binding) enabled(m *Model) bool { return b.when == nil || b.when(m) }
+
+// command is what the binding runs now; a form's shows its defaults with
+// the fields still to fill in capitals.
+func (b binding) command(m *Model) Command {
+	if b.form != nil {
+		return newForm(m.th, 0, b.form(m)).command()
+	}
+	return b.cmd(m)
+}
 
 var catalog = []binding{
 	bind(actQuit, scopeGlobal, "Quit", "q", "ctrl+c").foot(90, "quit"),
@@ -154,6 +208,12 @@ var catalog = []binding{
 	bind(actGoLabs, scopeGlobal, "Go to Labs", "6").pal(),
 	bind(actGoProfiles, scopeGlobal, "Go to Profiles", "7").pal(),
 	bind(actGoBinaries, scopeGlobal, "Go to Binaries", "8").pal(),
+	bind(actFirstLab, scopeGlobal, "Create your first lab", "n").foot(5, "new lab").onlyIf(noLabs).
+		opens(func(m *Model) *formSpec { return labCreateSpec(m, true) }),
+	bind(actStartLab, scopeGlobal, "Start the lab", "u").foot(6, "start lab").onlyIf(labIdle).
+		runs(labCmd("up"), "", false),
+	bind(actExec, scopeGlobal, "Run a chain binary command", "x").onlyIf(chainUp).opens(execSpec),
+	bind(actVersion, scopeGlobal, "Show the forklab version", "V").runs(func(*Model) Command { return Command{"version"} }, "", false).shows(),
 	bind(actNextPanel, scopeGlobal, "Next panel", "tab"),
 	bind(actPrevPanel, scopeGlobal, "Previous panel", "shift+tab"),
 
@@ -181,11 +241,39 @@ var catalog = []binding{
 		runs(nodeCmd("kill"), "Kill %s with SIGKILL? This simulates a crash.", true),
 	bind(actNodeRestart, scopeNodes, "Restart node", "r").foot(13, "restart").onlyIf(hasNode).
 		runs(nodeCmd("restart"), "Restart %s?", false),
+	bind(actNodeRestartOn, scopeNodes, "Restart node on a version", "R").foot(14, "on version").onlyIf(hasNode).opens(nodeRestartSpec),
 
 	bind(actLabUp, scopeLabs, "Start lab", "u").foot(10, "up").onlyIf(labCanStart).
 		runs(labCmd("up"), "Start lab %s?", false),
 	bind(actLabDown, scopeLabs, "Stop lab", "d").foot(11, "down").onlyIf(labRunning).
 		runs(labCmd("down"), "Stop lab %s and all its nodes?", true),
+	bind(actLabNew, scopeLabs, "New lab", "n").foot(12, "new").onlyIf(hasLabs).
+		opens(func(m *Model) *formSpec { return labCreateSpec(m, false) }),
+	bind(actLabReset, scopeLabs, "Reset lab", "R").foot(13, "reset").onlyIf(hasLab).
+		runs(labReset, "Reset %s? Every node's chain data is wiped and the chain replays from genesis.", true),
+	bind(actLabDelete, scopeLabs, "Delete lab", "D").foot(14, "delete").onlyIf(labStopped).
+		runs(labCmd("delete"), "Delete lab %s and everything in its directory?", true),
+	bind(actLabMnemonics, scopeLabs, "Show keys and mnemonics", "m").foot(15, "mnemonics").onlyIf(hasLab).
+		runs(func(m *Model) Command { return append(labCmd("show")(m), "--show-mnemonics") }, "", false).shows(),
+
+	bind(actProposalNew, scopeProposals, "New proposal", "n").foot(10, "new").onlyIf(chainUp).opens(govSubmitSpec),
+	bind(actProposalVote, scopeProposals, "Vote", "v").foot(11, "vote").onlyIf(hasProposal).opens(govVoteSpec),
+
+	bind(actUpgradeSchedule, scopeUpgrades, "Schedule an upgrade", "u").foot(10, "schedule").onlyIf(chainUp).opens(upgradeScheduleSpec),
+	bind(actUpgradeCancel, scopeUpgrades, "Cancel the upgrade", "X").foot(11, "cancel").onlyIf(hasPlan).
+		runs(func(*Model) Command { return Command{"upgrade", "cancel"} }, "Cancel upgrade %s through governance?", true),
+
+	bind(actSend, scopeAccounts, "Send tokens", "s").foot(10, "send").onlyIf(chainUp).opens(sendSpec),
+
+	bind(actProfileNew, scopeProfiles, "New profile", "n").foot(10, "new").opens(profileCreateSpec),
+	bind(actProfileEdit, scopeProfiles, "Edit profile", "e").foot(11, "edit").onlyIf(profileShown).opens(profileEditSpec),
+	bind(actProfileValidate, scopeProfiles, "Validate profile", "v").foot(12, "validate").onlyIf(hasProfile).
+		runs(profileCmd("validate"), "", false).shows(),
+	bind(actProfileDelete, scopeProfiles, "Delete profile", "D").foot(13, "delete").onlyIf(userProfile).
+		runs(profileCmd("delete"), "Delete profile %s?", true),
+
+	bind(actBinaryFetch, scopeBinaries, "Fetch a binary", "f").foot(10, "fetch").opens(binarySpec("fetch")),
+	bind(actBinaryBuild, scopeBinaries, "Build a binary from source", "b").foot(11, "build").opens(binarySpec("build")),
 
 	bind(actClose, scopeHelp, "Close", "esc", "?", "q", "ctrl+c").foot(10, "close"),
 	bind(actUp, scopeHelp, "Scroll up", "k", "up"),
@@ -203,6 +291,68 @@ var catalog = []binding{
 
 	bind(actConfirm, scopeConfirm, "Confirm", "enter", "y").foot(10, "confirm"),
 	bind(actClose, scopeConfirm, "Cancel", "esc", "n", "q", "ctrl+c").foot(11, "cancel"),
+
+	bind(actFormSubmit, scopeForm, "Run, or next step", "enter").foot(10, "run").onlyIf(formIdle),
+	bind(actFormNext, scopeForm, "Next field", "tab", "down").foot(11, "next").onlyIf(formIdle),
+	bind(actFormPrev, scopeForm, "Previous field", "shift+tab", "up").onlyIf(formIdle),
+	bind(actFormLeft, scopeForm, "Previous choice", "left").foot(12, "choose").shown("←→").onlyIf(formOnChoice),
+	bind(actFormRight, scopeForm, "Next choice", "right", "space").onlyIf(formOnChoice),
+	bind(actClose, scopeForm, "Cancel, or keep a running command in the background", "esc", "ctrl+c").foot(20, "close"),
+}
+
+func labReset(m *Model) Command {
+	c := labCmd("reset")(m)
+	if l, _ := m.selectedLab(); l.Running {
+		c = append(c, "--force")
+	}
+	return c
+}
+
+func profileCmd(verb string) func(*Model) Command {
+	return func(m *Model) Command {
+		p, _ := m.selectedProfile()
+		return Command{"profile", verb, p.Name}
+	}
+}
+
+func chainUp(m *Model) bool { return m.chainUp() }
+
+func hasLabs(m *Model) bool { return len(m.labs) > 0 }
+
+func noLabs(m *Model) bool { return m.labPhase() == phaseNoLab }
+
+func hasLab(m *Model) bool {
+	_, ok := m.selectedLab()
+	return ok
+}
+
+func labStopped(m *Model) bool {
+	l, ok := m.selectedLab()
+	return ok && !l.Running
+}
+
+// labIdle is true when no lab runs and the selected one can start.
+func labIdle(m *Model) bool { return m.labPhase() == phaseStopped && labCanStart(m) }
+
+func hasProposal(m *Model) bool { return m.chainUp() && len(m.proposals) > 0 }
+
+func hasPlan(m *Model) bool { return m.chainUp() && m.plan() != nil }
+
+func hasProfile(m *Model) bool {
+	_, ok := m.selectedProfile()
+	return ok
+}
+
+func userProfile(m *Model) bool {
+	p, ok := m.selectedProfile()
+	return ok && p.Origin == "user"
+}
+
+// profileShown is true once the selected profile's document has loaded,
+// since the edit form starts from it.
+func profileShown(m *Model) bool {
+	p, ok := m.selectedProfile()
+	return ok && m.profile != nil && m.profile.Name == p.Name
 }
 
 func nodeCmd(verb string) func(*Model) Command {
@@ -267,6 +417,8 @@ func (m *Model) scopesWith(o overlayKind) []scope {
 		return []scope{scopePreview}
 	case overlayConfirm:
 		return []scope{scopeConfirm}
+	case overlayForm:
+		return []scope{scopeForm}
 	}
 	var out []scope
 	if s, ok := panels[m.panel].scope(); ok {
@@ -303,16 +455,17 @@ func hasKey(keys []string, key string) bool {
 }
 
 // footerBindings are the enabled bindings of the active scopes that rank in
-// the footer, in rank order.
+// the footer, in rank order. A binding whose key a more specific scope
+// takes is left out, since the key does not reach it.
 func (m *Model) footerBindings() []binding {
-	active := map[scope]bool{}
-	for _, sc := range m.scopes() {
-		active[sc] = true
-	}
 	var out []binding
-	for _, b := range catalog {
-		if b.footer > 0 && active[b.scope] && b.enabled(m) {
-			out = append(out, b)
+	for _, sc := range m.scopes() {
+		for _, b := range catalog {
+			if b.footer > 0 && b.scope == sc && b.enabled(m) {
+				if match, _ := m.match(b.keys[0]); match.scope == sc && match.id == b.id {
+					out = append(out, b)
+				}
+			}
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].footer < out[j].footer })
@@ -330,8 +483,8 @@ func (m *Model) helpGroups() []helpGroup {
 	var groups []helpGroup
 	for _, sc := range scopes {
 		g := helpGroup{title: scopeTitles[sc]}
-		if sc == scopeNodes || sc == scopeLabs {
-			g.title = panels[m.panel].title
+		if p, ok := panelOf(sc); ok {
+			g.title = panels[p].title
 		}
 		for _, b := range catalog {
 			if b.scope == sc {
@@ -401,7 +554,7 @@ func (m *Model) activeCommands() []binding {
 	var out []binding
 	for _, sc := range m.scopesWith(overlayNone) {
 		for _, b := range catalog {
-			if b.scope == sc && b.cmd != nil && b.enabled(m) {
+			if b.scope == sc && (b.cmd != nil || b.form != nil) && b.enabled(m) {
 				out = append(out, b)
 			}
 		}
@@ -452,11 +605,16 @@ func init() {
 		actPageDown:    func(m *Model) tea.Cmd { return m.move(m.pageSize()) },
 		actFollow:      (*Model).toggleFollow,
 		actWrap:        func(m *Model) tea.Cmd { m.logs.wrap = !m.logs.wrap; return nil },
-		actClose:       func(m *Model) tea.Cmd { m.overlay = overlayNone; return nil },
+		actClose:       (*Model).closeOverlay,
 		actConfirm:     (*Model).confirmRun,
 		actOverlayUp:   func(m *Model) tea.Cmd { m.overlayMove(-1); return nil },
 		actOverlayDown: func(m *Model) tea.Cmd { m.overlayMove(1); return nil },
 		actRun:         (*Model).overlayRun,
+		actFormSubmit:  (*Model).formSubmit,
+		actFormNext:    func(m *Model) tea.Cmd { m.form.move(1); return m.syncForm() },
+		actFormPrev:    func(m *Model) tea.Cmd { m.form.back(); return m.syncForm() },
+		actFormLeft:    func(m *Model) tea.Cmd { return m.formCycle(-1) },
+		actFormRight:   func(m *Model) tea.Cmd { return m.formCycle(1) },
 	}
 }
 

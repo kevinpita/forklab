@@ -246,7 +246,7 @@ Binaries are cached under `~/.forklab/bin/<chain>/<version>/`.
 | `upgrade cancel` | Cancel the scheduled upgrade through governance |
 | `upgrade status` | Show the plan and each node's version and swap state |
 | `exec -- <bin args>` | Run the chain binary with the lab's home, node, chain id, and keyring |
-| `tui` | Open the terminal UI |
+| `tui` | Open the terminal UI, the same as `forklab` with no command |
 | `version` | Print the forklab version |
 
 Run `forklab <command> --help` for every flag.
@@ -261,15 +261,19 @@ forklab is built for scripts and agents as well as people:
 - Commands never prompt. Missing input is an error that names the flag.
 - Exit codes are `0` ok, `1` error, `2` usage, and `3` lab not running.
 - Progress and warnings go to stderr.
-- Help (`forklab`, `forklab help`, `--help`) always prints text.
+- Help (`forklab help`, `--help`) always prints text. `forklab` with no
+  command opens the TUI, so `forklab --json` alone is a usage error.
 
 ## TUI
 
-`forklab tui` opens a keyboard-driven terminal UI with panels for nodes,
-consensus, proposals, upgrades, accounts, profiles, binaries, and labs. Every
-action runs a `forklab ... --json` command, and the TUI shows that command
-before it runs. Press `Ctrl+K` for the command palette and `?` for the keys of
-the focused panel.
+`forklab` with no command (or `forklab tui`) opens a keyboard-driven terminal
+UI with panels for nodes, consensus, proposals, upgrades, accounts, profiles,
+binaries, and labs. Every action runs a `forklab ... --json` command, and the
+TUI shows that command before it runs. Forms (new lab, new or edited profile,
+upgrade schedule, send, proposal, vote, restart on a version, binary fetch and
+build) show the exact command as you type. With no lab yet, a guided wizard
+creates the first one. Press `Ctrl+K` for the command palette and `?` for the
+keys of the focused panel.
 
 ## Files
 

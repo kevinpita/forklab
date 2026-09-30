@@ -51,6 +51,21 @@ func fixture(argv string) int {
 	case "status -w --json":
 		file("status_w.ndjson")
 		fmt.Println(`{"error":{"code":"error","message":"rpc status: connection refused"}}`)
+	case "profile list --json":
+		file("profile_list.json")
+	case "profile show lsimd --json":
+		file("profile_show.json")
+	case "lab list --json":
+		file("lab_list.json")
+	case "account list --json":
+		file("account_list.json")
+	case "gov list --json":
+		file("gov_list.json")
+	case "lab create devnet --profile lsimd --version 0.53.8 --validators 2 --json":
+		fmt.Println(`{"ok":true,"data":{"name":"devnet"}}`)
+	case "lab create taken --profile lsimd --version 0.53.8 --validators 2 --json":
+		fmt.Println(`{"ok":false,"error":{"code":"error","message":"lab taken already exists"}}`)
+		return 1
 	case "node logs 0 -f --tail 500 --json":
 		file("node_logs.ndjson")
 		time.Sleep(time.Minute)

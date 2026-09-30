@@ -26,8 +26,14 @@ func (a *app) print(cmd *cobra.Command, r output.Result) error {
 
 func newRootCmd(a *app) *cobra.Command {
 	root := &cobra.Command{
-		Use:           "forklab",
-		Short:         "Local multi-validator playground for Cosmos SDK chains",
+		Use:   "forklab",
+		Short: "Local multi-validator playground for Cosmos SDK chains",
+		Long: "Local multi-validator playground for Cosmos SDK chains.\n\n" +
+			"Run forklab with no command to open the terminal UI. Every action the UI takes is\n" +
+			"one of the commands below, which scripts and agents run directly with --json.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runTUI(a, cmd, "")
+		},
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		CompletionOptions: cobra.CompletionOptions{

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -12,7 +13,7 @@ import (
 func TestQuitWaitsForRunningAction(t *testing.T) {
 	m := loadedModel(t, buildTheme("ansi", true))
 	m.w, m.h = 120, 40
-	m.running = []Command{{"lab", "down", "demo"}}
+	m.running = []runningCmd{{cmd: Command{"lab", "down", "demo"}}}
 	if cmd := press(m, "q"); cmd != nil {
 		t.Fatal("quit did not wait for the running lab down")
 	}
@@ -39,8 +40,16 @@ func TestChainStreamErrorMeansChainDown(t *testing.T) {
 	if m.proposals != nil || m.accounts != nil || m.upgrade != nil {
 		t.Fatal("chain panels still show data from before the failure")
 	}
-	if h := ansi.Strip(m.header()); !strings.Contains(h, "connection refused") {
-		t.Fatalf("header does not show the failure: %q", h)
+	if h := ansi.Strip(m.header()); strings.Contains(h, "connection refused") || !strings.Contains(h, "Starting the chain…") {
+		t.Fatalf("header while the chain has not answered yet: %q", h)
+	}
+	m.last = nil
+	m.quietSince = time.Now().Add(-2 * startGrace)
+	if h := ansi.Strip(m.header()); strings.Contains(h, "connection refused") || !strings.Contains(h, "Chain not answering, see the status line") {
+		t.Fatalf("header after the grace: %q", h)
+	}
+	if line := ansi.Strip(m.statusLine()); !strings.Contains(line, "connection refused") {
+		t.Fatalf("status line does not carry the failure: %q", line)
 	}
 	m.poll(true)
 	for _, k := range []loadKind{loadProposals, loadAccounts, loadUpgrade, loadProposal} {
@@ -118,9 +127,10 @@ func TestMultiLineErrorsStayOnOneRow(t *testing.T) {
 	m.last = &Result{Cmd: Command{"node", "list"}, Err: multi}
 	m.loads[loadNodes].err = multi
 	mustFit(t, m, "ansi", [2]int{80, 24}, "multi-line error")
+	m.last, m.quietSince = nil, time.Now().Add(-2*startGrace)
 	lines := strings.Split(ansi.Strip(m.render()), "\n")
-	if !strings.Contains(lines[0], "rpc status: failed caused by: dial tcp connection refused") {
-		t.Errorf("header = %q", lines[0])
+	if !strings.Contains(lines[len(lines)-2], "rpc status: failed caused by: dial tcp") {
+		t.Errorf("status line = %q", lines[len(lines)-2])
 	}
 	if !strings.Contains(lines[len(lines)-1], "help") {
 		t.Errorf("footer clipped: %q", lines[len(lines)-1])

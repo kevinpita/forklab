@@ -46,6 +46,87 @@ func TestSmokeEverySizeAndTheme(t *testing.T) {
 	}
 }
 
+// TestSmokeForms opens every form at every size, changes a field, cycles
+// a choice, and submits it half filled.
+func TestSmokeForms(t *testing.T) {
+	sizes := [][2]int{{180, 50}, {120, 40}, {80, 24}, {59, 20}, {40, 12}, {20, 6}, {12, 8}, {1, 1}}
+	var walk []string
+	for _, open := range [][]string{
+		{"6", "n"},
+		{"6", "R"},
+		{"6", "m"},
+		{"4", "u"},
+		{"4", "X"},
+		{"5", "s"},
+		{"3", "n"},
+		{"3", "v"},
+		{"7", "n"},
+		{"7", "e"},
+		{"8", "f"},
+		{"8", "b"},
+		{"1", "R"},
+		{"1", "x"},
+	} {
+		walk = append(walk, open...)
+		walk = append(walk, "a", "tab", "right", "tab", "space", "enter", "shift+tab", "esc", "esc")
+	}
+	for _, th := range []Theme{buildTheme("ansi", true), buildTheme("gruvbox", false)} {
+		for _, size := range sizes {
+			m := loadedModel(t, th)
+			m.upgrade.Plan = &chainPlan{Name: "v2", Height: 40}
+			m.Update(windowSize(size))
+			for _, k := range walk {
+				press(m, k)
+				mustFit(t, m, th.Name, size, k)
+			}
+		}
+	}
+}
+
+// The focused panel lists every row it has while the screen has room,
+// however many rows the other panels want.
+func TestFocusedPanelListsEveryRow(t *testing.T) {
+	for h := 14; h <= 44; h++ {
+		size := [2]int{100, h}
+		m := loadedModel(t, buildTheme("ansi", true))
+		m.Update(windowSize(size))
+		press(m, "4")
+		lines := strings.Split(ansi.Strip(m.render()), "\n")
+		box := ""
+		for i, l := range lines {
+			if strings.Contains(l, "[4] Upgrades") {
+				for _, row := range lines[i+1:] {
+					left := string([]rune(row)[:m.leftW()])
+					if strings.Contains(left, "╰") {
+						break
+					}
+					box += left + "\n"
+				}
+			}
+		}
+		if !strings.Contains(box, "node0") || !strings.Contains(box, "node1") {
+			t.Errorf("size %v: focused Upgrades lists\n%s", size, box)
+		}
+	}
+}
+
+// TestSmokeFirstLabWizard walks the wizard every step at every size.
+func TestSmokeFirstLabWizard(t *testing.T) {
+	sizes := [][2]int{{180, 50}, {80, 24}, {59, 20}, {40, 12}, {20, 6}, {12, 8}, {1, 1}}
+	for _, size := range sizes {
+		m := emptyModel(t)
+		m.Update(windowSize(size))
+		feedLabs(t, m, `[]`)
+		m.form.fields[0].opts = []option{{"simd", "simd  builtin"}}
+		m.form.fields[1].opts = []option{{"0.53.8", "0.53.8  url"}}
+		mustFit(t, m, "ansi", size, "wizard")
+		for _, k := range []string{"enter", "enter", "enter", "right", "enter", "x", "enter", "enter", "enter", "shift+tab", "enter", "esc"} {
+			press(m, k)
+			mustFit(t, m, "ansi", size, "wizard "+k)
+		}
+	}
+}
+
 func mustFit(t *testing.T, m *Model, theme string, size [2]int, after string) {
 	t.Helper()
 	defer func() {

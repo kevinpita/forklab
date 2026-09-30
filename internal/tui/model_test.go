@@ -158,7 +158,7 @@ func TestLabNotRunningClearsHeader(t *testing.T) {
 	if m.status != nil || m.chainUp() {
 		t.Fatal("status kept after lab_not_running")
 	}
-	if h := ansi.Strip(m.header()); !strings.Contains(h, "no lab running") {
+	if h := ansi.Strip(m.header()); strings.Contains(h, "no lab running") || !strings.Contains(h, "Starting the chain…") {
 		t.Fatalf("header = %q", h)
 	}
 }
