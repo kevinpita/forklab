@@ -198,11 +198,12 @@ func (l Labs) List() ([]Listing, error) {
 	return out, nil
 }
 
-// ErrRunning means the lab's supervisor answers, so its nodes may be live.
+// ErrRunning means the lab's supervisor answers or one of its nodes runs.
 var ErrRunning = errors.New("lab is running")
 
 // Delete removes the lab named name and returns its directory. A lab whose
-// supervisor answers is refused. A broken lab.yaml does not stop it.
+// supervisor answers, or whose nodes outlived a killed supervisor, is
+// refused. A broken lab.yaml does not stop it.
 func (l Labs) Delete(name string) (string, error) {
 	dir, err := l.Path(name)
 	if err != nil {
@@ -215,6 +216,13 @@ func (l Labs) Delete(name string) (string, error) {
 	}
 	if _, err := supervisor.Dial(dir); err == nil {
 		return "", fmt.Errorf("lab %s: %w", name, ErrRunning)
+	}
+	live, err := supervisor.LiveNodes(dir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("lab %s: %w", name, err)
+	}
+	if len(live) > 0 {
+		return "", fmt.Errorf("lab %s: %w (nodes %v have no supervisor)", name, ErrRunning, live)
 	}
 	return dir, os.RemoveAll(dir)
 }

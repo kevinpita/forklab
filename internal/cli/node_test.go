@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kevinpita/forklab/internal/lab"
 	"github.com/kevinpita/forklab/internal/supervisor"
+	"go.yaml.in/yaml/v3"
 )
 
 // TestMain lets the node commands spawn this test binary as the supervisor:
@@ -29,7 +31,14 @@ func newShellLab(t *testing.T) string {
 	t.Helper()
 	t.Setenv("FORKLAB_HOME", filepath.Join(t.TempDir(), "home"))
 	t.Setenv("FORKLAB_TEST_CHILD", "1")
-	dir := filepath.Join(t.TempDir(), "lab")
+	return addShellLab(t, "demo")
+}
+
+// addShellLab writes a one-node lab named name under $FORKLAB_HOME/labs whose
+// node is shellNode, and kills its processes when the test ends.
+func addShellLab(t *testing.T, name string) string {
+	t.Helper()
+	dir := filepath.Join(os.Getenv("FORKLAB_HOME"), "labs", name)
 	home := filepath.Join(dir, "node0")
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		t.Fatal(err)
@@ -44,21 +53,33 @@ func newShellLab(t *testing.T) string {
 	if err := supervisor.SaveNodes(dir, []supervisor.NodeSpec{spec}); err != nil {
 		t.Fatal(err)
 	}
+	config, err := yaml.Marshal(lab.Config{Name: name, Mode: lab.ModeFresh, Validators: 1, Nodes: []lab.Node{{Name: "node0"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "lab.yaml"), config, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		for _, p := range []string{supervisor.Paths{Dir: dir}.Lock(), spec.PidPath} {
-			data, _ := os.ReadFile(p)
-			var pf struct {
-				PID int `json:"pid"`
-			}
-			if json.Unmarshal(data, &pf) != nil {
-				pf.PID, _ = strconv.Atoi(strings.TrimSpace(string(data)))
-			}
-			if pf.PID > 0 {
-				_ = syscall.Kill(pf.PID, syscall.SIGKILL)
+			if pid := pidIn(p); pid > 0 {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
 			}
 		}
 	})
 	return dir
+}
+
+// pidIn reads a node pid file or supervisor.lock; 0 when there is none.
+func pidIn(path string) int {
+	data, _ := os.ReadFile(path)
+	var pf struct {
+		PID int `json:"pid"`
+	}
+	if json.Unmarshal(data, &pf) != nil {
+		pf.PID, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+	}
+	return pf.PID
 }
 
 func nodesOf(t *testing.T, stdout string) []supervisor.NodeStatus {
@@ -71,13 +92,6 @@ func nodesOf(t *testing.T, stdout string) []supervisor.NodeStatus {
 		t.Fatalf("not an ok envelope: %v: %q", err, stdout)
 	}
 	return env.Data
-}
-
-func TestNodeCommandsRequireLab(t *testing.T) {
-	code, _, stderr := run("node", "list")
-	if code != 2 || !strings.Contains(stderr, `"lab"`) {
-		t.Errorf("code = %d, stderr = %q; want usage error naming --lab", code, stderr)
-	}
 }
 
 func TestNodeCommandsDriveASupervisor(t *testing.T) {

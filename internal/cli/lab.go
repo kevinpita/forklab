@@ -29,9 +29,9 @@ func labs() (lab.Labs, error) {
 func newLabCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "lab",
-		Short: "Create, inspect, and delete labs",
+		Short: "Create, run, reset, and delete labs",
 	}
-	cmd.AddCommand(newLabCreateCmd(a), newLabListCmd(a), newLabShowCmd(a), newLabDeleteCmd(a))
+	cmd.AddCommand(newLabCreateCmd(a), newLabListCmd(a), newLabShowCmd(a), newLabUpCmd(a), newLabDownCmd(a), newLabResetCmd(a), newLabDeleteCmd(a))
 	return cmd
 }
 
@@ -253,8 +253,7 @@ func newLabDeleteCmd(a *app) *cobra.Command {
 			}
 			dir, err := l.Delete(args[0])
 			if errors.Is(err, lab.ErrRunning) {
-				path, _ := l.Path(args[0])
-				return fmt.Errorf("%w; stop it first with forklab supervisor down --lab %s", err, path)
+				return fmt.Errorf("%w; stop it first with forklab lab down %s", err, args[0])
 			}
 			if err != nil {
 				return err

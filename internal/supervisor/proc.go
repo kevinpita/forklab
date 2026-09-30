@@ -52,6 +52,30 @@ func readPidFile(path string) (pidFile, error) {
 	return p, nil
 }
 
+// LiveNodes returns the indexes of labDir's nodes whose pid file names a live
+// process running the recorded binary with the node's home, whether or not a
+// supervisor watches it.
+func LiveNodes(labDir string) ([]int, error) {
+	specs, err := LoadNodes(labDir)
+	if err != nil {
+		return nil, err
+	}
+	var live []int
+	for _, s := range specs {
+		pf, err := readPidFile(s.PidPath)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if alive(pf.PID) && cmdlineMatches(pf.PID, pf.Binary, s.Home) {
+			live = append(live, s.Index)
+		}
+	}
+	return live, nil
+}
+
 // detach starts cmd in its own session with stdin from /dev/null and stdout
 // and stderr appended to logPath, so it outlives its parent.
 func detach(cmd *exec.Cmd, logPath string) error {

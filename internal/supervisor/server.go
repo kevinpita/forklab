@@ -280,15 +280,17 @@ func (s *supervisor) restart(n *node, binary string, timeout time.Duration) erro
 	if binary == "" || binary == previous {
 		return nil
 	}
-	p := n.running()
-	select {
-	case <-p.done:
-		<-p.tailDone
-		st := n.status()
-		return restore(fmt.Errorf("node %d exited within %s on %s (exit code %v, signal %q); keeping %s", n.spec.Index, binaryProbe, binary, deref(st.ExitCode), st.Signal, previous))
-	case <-time.After(binaryProbe):
-		return s.saveNodes()
+	// A child that died at once may already be recorded as exited, leaving no
+	// running process to wait on.
+	if p := n.running(); p != nil {
+		select {
+		case <-p.gone:
+		case <-time.After(binaryProbe):
+			return s.saveNodes()
+		}
 	}
+	st := n.status()
+	return restore(fmt.Errorf("node %d exited within %s on %s (exit code %v, signal %q); keeping %s", n.spec.Index, binaryProbe, binary, deref(st.ExitCode), st.Signal, previous))
 }
 
 func deref(code *int) any {

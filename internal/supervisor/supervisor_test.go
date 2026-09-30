@@ -403,6 +403,33 @@ func TestRestartWithBinaryOverridePersists(t *testing.T) {
 	}
 }
 
+// Only later restarts are timed: the first stops a -race fake node, which
+// sleeps a second at exit.
+func TestRestartOnABinaryThatExitsAtOnceKeepsTheOldOne(t *testing.T) {
+	h := newHarness(t)
+	l := h.lab(1)
+	c := up(t, l)
+	mustStart(t, c, l, supervisor.All)
+	bad := filepath.Join(t.TempDir(), "bad-node")
+	if err := os.WriteFile(bad, []byte("#!/bin/sh\nexit 3\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 10 {
+		start := time.Now()
+		nodes, err := c.Restart("0", bad, 5*time.Second)
+		if err == nil || !strings.Contains(err.Error(), "keeping "+os.Args[0]) {
+			t.Fatalf("restart %d on %s: %v, %+v; want it refused", i, bad, err, nodes)
+		}
+		if took := time.Since(start); i > 0 && took > 900*time.Millisecond {
+			t.Fatalf("restart %d took %s; an instant exit should not wait out the probe", i, took)
+		}
+		specs, err := supervisor.LoadNodes(l.dir)
+		if err != nil || specs[0].Binary != os.Args[0] {
+			t.Fatalf("nodes.json binary = %q, %v; want %s", specs[0].Binary, err, os.Args[0])
+		}
+	}
+}
+
 func TestSecondLabIsRefusedWhileOneIsActive(t *testing.T) {
 	h := newHarness(t)
 	a := h.lab(1)

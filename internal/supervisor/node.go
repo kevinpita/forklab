@@ -40,7 +40,8 @@ type NodeStatus struct {
 
 // process is one live node process. cmd is nil for adopted processes, whose
 // exit is observed by polling instead of wait(2). done closes when the exit
-// is observed; tailDone closes once the log tail has drained after it.
+// is observed; tailDone closes once the log tail has drained after it; gone
+// closes once the exit is recorded, when the node no longer reads as running.
 type process struct {
 	pid       int
 	binary    string
@@ -48,6 +49,7 @@ type process struct {
 	cmd       *exec.Cmd
 	done      chan struct{}
 	tailDone  chan struct{}
+	gone      chan struct{}
 }
 
 type exitInfo struct {
@@ -160,7 +162,7 @@ func (n *node) adopt() error {
 // from pf.LogOffset, persisting the delivered offset back into the pid file
 // so the next supervisor resumes there.
 func (n *node) attach(pf pidFile, cmd *exec.Cmd, adopted bool) *process {
-	p := &process{pid: pf.PID, binary: pf.Binary, startedAt: pf.StartedAt, cmd: cmd, done: make(chan struct{}), tailDone: make(chan struct{})}
+	p := &process{pid: pf.PID, binary: pf.Binary, startedAt: pf.StartedAt, cmd: cmd, done: make(chan struct{}), tailDone: make(chan struct{}), gone: make(chan struct{})}
 	n.mu.Lock()
 	n.proc, n.adopted, n.last = p, adopted, nil
 	spec := n.spec
@@ -214,7 +216,7 @@ func (n *node) adoptedAlive(p *process) bool {
 
 // exited lets the tail drain what the process wrote, then records the exit
 // and removes the pid file. Until then the node still reads as running, so
-// signal waits for tailDone before its caller may start a new process.
+// signal waits for gone before its caller may start a new process.
 func (n *node) exited(p *process, e exitInfo) {
 	close(p.done)
 	<-p.tailDone
@@ -225,6 +227,7 @@ func (n *node) exited(p *process, e exitInfo) {
 	}
 	index := n.spec.Index
 	n.mu.Unlock()
+	close(p.gone)
 	switch {
 	case e.signal != "":
 		n.log.Printf("node %d: pid %d ended by signal %s", index, p.pid, e.signal)
@@ -243,15 +246,14 @@ func (n *node) signal(sig syscall.Signal, timeout time.Duration) error {
 		return nil
 	}
 	if p.cmd == nil && !n.adoptedAlive(p) {
-		<-p.tailDone
+		<-p.gone
 		return nil
 	}
 	if err := syscall.Kill(p.pid, sig); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return fmt.Errorf("signal node %d: %w", n.spec.Index, err)
 	}
 	select {
-	case <-p.done:
-		<-p.tailDone
+	case <-p.gone:
 		return nil
 	case <-time.After(timeout):
 		return fmt.Errorf("node %d (pid %d) still running %s after %s", n.spec.Index, p.pid, timeout, sig)

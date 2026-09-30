@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,24 +29,80 @@ func TestE2ELabFresh(t *testing.T) {
 		{"FORKLAB_EXRPD", "xrplevm", "11.1.1"},
 	} {
 		t.Run(c.profile, func(t *testing.T) {
-			bin := os.Getenv(c.env)
-			if bin == "" {
-				t.Skipf("%s not set", c.env)
-			}
-			config := t.TempDir()
-			t.Setenv("FORKLAB_CONFIG_DIR", config)
-			t.Setenv("FORKLAB_HOME", t.TempDir())
-			t.Setenv("FORKLAB_TEST_CHILD", "1")
-			e, err := profile.Store{Dir: t.TempDir()}.Get(c.profile)
-			if err != nil {
-				t.Fatal(err)
-			}
-			e.Doc.Binaries = map[string]profile.BinaryDocument{c.version: {Path: bin}}
-			if _, err := (profile.Store{Dir: filepath.Join(config, "profiles")}).Save(e.Doc); err != nil {
-				t.Fatal(err)
-			}
+			pathProfile(t, c.env, c.profile, c.version)
 			runLabFresh(t, c.profile, c.version)
 		})
+	}
+}
+
+// pathProfile isolates forklab's dirs and saves a user profile that copies
+// the built-in one with the binary named by env as a path source.
+func pathProfile(t *testing.T, env, name, version string) {
+	t.Helper()
+	bin := os.Getenv(env)
+	if bin == "" {
+		t.Skipf("%s not set", env)
+	}
+	config := t.TempDir()
+	t.Setenv("FORKLAB_CONFIG_DIR", config)
+	t.Setenv("FORKLAB_HOME", t.TempDir())
+	t.Setenv("FORKLAB_TEST_CHILD", "1")
+	e, err := profile.Store{Dir: t.TempDir()}.Get(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Doc.Binaries = map[string]profile.BinaryDocument{version: {Path: bin}}
+	if _, err := (profile.Store{Dir: filepath.Join(config, "profiles")}).Save(e.Doc); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestE2ELabLifecycle runs a simd lab through up, down, reset, and up again,
+// and checks that the second run replays the chain from genesis.
+func TestE2ELabLifecycle(t *testing.T) {
+	pathProfile(t, "FORKLAB_SIMD", "simd", "0.53.8")
+	forklab(t, "lab", "create", "cycle", "--profile", "simd", "--version", "0.53.8", "--validators", "2")
+	l, err := labs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := l.Get("cycle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		var out bytes.Buffer
+		_ = Run([]string{"lab", "down", "cycle"}, &out, &out)
+	})
+	client, err := chain.New(fmt.Sprintf("http://127.0.0.1:%d", c.Nodes[0].RPCPort()), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	defer cancel()
+
+	forklab(t, "lab", "up", "cycle")
+	forklab(t, "lab", "up", "cycle")
+	before, err := client.WaitHeight(ctx, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forklab(t, "lab", "down", "cycle")
+	forklab(t, "lab", "down", "cycle")
+	forklab(t, "lab", "reset", "cycle")
+	forklab(t, "lab", "up", "cycle")
+	st, err := client.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.EarliestHeight != 1 || st.LatestHeight >= before {
+		t.Fatalf("after reset: heights %d..%d, want a chain replayed from 1 below %d", st.EarliestHeight, st.LatestHeight, before)
+	}
+	t.Logf("height %d before reset, %d after reset and up", before, st.LatestHeight)
+	forklab(t, "lab", "down", "cycle")
+	forklab(t, "lab", "delete", "cycle")
+	if _, _, err := l.Get("cycle"); !errors.Is(err, lab.ErrNotFound) {
+		t.Fatalf("lab after delete: %v", err)
 	}
 }
 

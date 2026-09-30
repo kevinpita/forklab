@@ -14,13 +14,17 @@ import (
 )
 
 func newNodeCmd(a *app) *cobra.Command {
-	var labDir string
+	var labArg, labDir string
 	cmd := &cobra.Command{
 		Use:   "node",
 		Short: "Control a lab's node processes",
+		PersistentPreRunE: func(*cobra.Command, []string) error {
+			var err error
+			labDir, err = resolveLab(labArg)
+			return err
+		},
 	}
-	cmd.PersistentFlags().StringVar(&labDir, "lab", "", "lab directory")
-	_ = cmd.MarkPersistentFlagRequired("lab")
+	cmd.PersistentFlags().StringVar(&labArg, "lab", "", "lab name or directory (default: the running lab, else the only lab)")
 	cmd.AddCommand(
 		newNodeListCmd(a, &labDir),
 		newNodeStartCmd(a, &labDir),
@@ -47,18 +51,21 @@ func (l nodeList) WriteHuman(w io.Writer) error {
 				pid += " (adopted)"
 			}
 		case supervisor.StateExited:
-			switch {
-			case n.Signal != "":
-				exit = n.Signal
-			case n.ExitCode != nil:
-				exit = strconv.Itoa(*n.ExitCode)
-			default:
-				exit = "unknown"
-			}
+			exit = exitOf(n)
 		}
 		_, _ = fmt.Fprintf(tw, "%d %s\t%s\t%s\t%s\t%s\t%s\n", n.Index, n.Name, n.State, pid, uptime, exit, n.Binary)
 	}
 	return tw.Flush()
+}
+
+func exitOf(n supervisor.NodeStatus) string {
+	switch {
+	case n.Signal != "":
+		return n.Signal
+	case n.ExitCode != nil:
+		return strconv.Itoa(*n.ExitCode)
+	}
+	return "unknown"
 }
 
 var nodeArg = cobra.ExactArgs(1)

@@ -74,6 +74,25 @@ func lockActive(labDir string) (*os.File, error) {
 	return f, err
 }
 
+// ActiveLab is the lab dir whose supervisor holds active.lock, or "" when no
+// supervisor runs. The file keeps a dead holder's dir, so only a held lock
+// counts.
+func ActiveLab() (string, error) {
+	path, err := ActiveLockPath()
+	if err != nil {
+		return "", err
+	}
+	f, err := tryLock(path)
+	if err == nil {
+		return "", f.Close()
+	}
+	if !errors.Is(err, errLocked) {
+		return "", err
+	}
+	data, err := os.ReadFile(path)
+	return strings.TrimSpace(string(data)), err
+}
+
 func writeLockContent(f *os.File, line string) error {
 	if err := f.Truncate(0); err != nil {
 		return err
