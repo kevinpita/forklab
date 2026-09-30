@@ -191,9 +191,9 @@ func schedule(cmd *cobra.Command, a *app, e labEnv, version string, f scheduleFl
 	if err != nil {
 		return err
 	}
-	if pending, _, err := sup.Upgrade(); err != nil {
+	if st, err := sup.Upgrade(); err != nil {
 		return err
-	} else if pending != nil && pending.ProposalID != 0 {
+	} else if pending := st.Upgrade; pending != nil && pending.ProposalID != 0 {
 		if prop, err := c.Proposal(ctx, pending.ProposalID); err == nil && !terminal(prop.Status) {
 			return fmt.Errorf("upgrade %q is registered and its proposal %d is still in %s; wait for it or run forklab upgrade cancel", pending.Name, pending.ProposalID, prop.Status)
 		}
@@ -249,7 +249,7 @@ func schedule(cmd *cobra.Command, a *app, e labEnv, version string, f scheduleFl
 
 	swapCtx, cancel := context.WithTimeout(ctx, time.Duration(height-current)*blockTime+swapGrace)
 	defer cancel()
-	if nodes, err = waitSwapped(swapCtx, e.dir); err != nil {
+	if nodes, err = waitSwapped(swapCtx, e.dir, name); err != nil {
 		return fmt.Errorf("upgrade %q: %w%s", name, err, e.unswappedLogs(nodes))
 	}
 	pastCtx, cancelPast := context.WithTimeout(ctx, pastPlanTimeout)
@@ -258,6 +258,12 @@ func schedule(cmd *cobra.Command, a *app, e labEnv, version string, f scheduleFl
 		return fmt.Errorf("upgrade %q: every node was swapped to %s, but the chain did not pass height %d:\n%w", name, bin.Path, height+pastPlanBlocks, err)
 	}
 	v.Upgraded = true
+	if sup, err = ensureSupervisor(ctx, e.dir); err == nil {
+		_, err = sup.CompleteUpgrade(name)
+	}
+	if err != nil {
+		return fmt.Errorf("upgrade %q: the chain passed height %d on %s, but the supervisor did not mark the upgrade completed: %w", name, v.Height, version, err)
+	}
 	if cfg, err := lab.Load(e.dir); err == nil {
 		e.cfg = cfg
 	}
@@ -352,18 +358,23 @@ func submitAndPass(ctx context.Context, c chain.CLI, rpc *chain.Client, cfg lab.
 	}
 }
 
-// waitSwapped polls the supervisor until every node is swapped, spawning a
-// new supervisor when the last one died so it finishes the swap. A failed
-// swap or a cleared plan ends the wait.
-func waitSwapped(ctx context.Context, dir string) ([]supervisor.NodeStatus, error) {
+// waitSwapped polls the supervisor until every node is swapped to plan name,
+// spawning a new supervisor when the last one died so it finishes the swap.
+// A plan another command already completed counts as swapped. A failed swap
+// or a cleared plan ends the wait.
+func waitSwapped(ctx context.Context, dir, name string) ([]supervisor.NodeStatus, error) {
 	last := errors.New("no supervisor status yet")
 	var nodes []supervisor.NodeStatus
 	for {
 		sup, err := ensureSupervisor(ctx, dir)
 		if err == nil {
-			var pending *supervisor.Upgrade
-			if pending, nodes, err = sup.Upgrade(); err == nil {
-				if pending == nil {
+			var st supervisor.Response
+			if st, err = sup.Upgrade(); err == nil {
+				nodes = st.Nodes
+				if st.Upgrade == nil && st.Completed != nil && st.Completed.Name == name {
+					return nodes, nil
+				}
+				if st.Upgrade == nil {
 					return nodes, errors.New("the plan was cleared from the supervisor")
 				}
 				done := true
@@ -528,11 +539,13 @@ func newUpgradeCancelCmd(a *app, ref *string) *cobra.Command {
 type upgradeStatusView struct {
 	Lab string `json:"lab"`
 	// Plan is what the chain has scheduled; Pending what the supervisor
-	// swaps to.
-	Plan     *chain.Plan         `json:"plan"`
-	Pending  *supervisor.Upgrade `json:"pending"`
-	Nodes    []upgradeNode       `json:"nodes"`
-	Warnings []string            `json:"warnings,omitempty"`
+	// swaps to; Completed the last upgrade every node was swapped to and
+	// the chain went past.
+	Plan      *chain.Plan         `json:"plan"`
+	Pending   *supervisor.Upgrade `json:"pending"`
+	Completed *supervisor.Upgrade `json:"completed"`
+	Nodes     []upgradeNode       `json:"nodes"`
+	Warnings  []string            `json:"warnings,omitempty"`
 }
 
 func (v upgradeStatusView) WriteHuman(w io.Writer) error {
@@ -541,9 +554,13 @@ func (v upgradeStatusView) WriteHuman(w io.Writer) error {
 	} else {
 		_, _ = fmt.Fprintf(w, "chain: upgrade %q at height %d\n", v.Plan.Name, v.Plan.Height)
 	}
-	if v.Pending == nil {
+	switch {
+	case v.Pending == nil && v.Completed != nil:
+		c := v.Completed
+		_, _ = fmt.Fprintf(w, "supervisor: last upgrade %q to version %s completed at height %d\n", c.Name, c.Version, c.Height)
+	case v.Pending == nil:
 		_, _ = fmt.Fprintln(w, "supervisor: no pending upgrade")
-	} else {
+	default:
 		swap := "manual swap"
 		if v.Pending.AutoSwap {
 			swap = "auto swap"
@@ -572,20 +589,34 @@ func newUpgradeStatusCmd(a *app, ref *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			pending, nodes, err := sup.Upgrade()
+			st, err := sup.Upgrade()
 			if err != nil {
 				return err
 			}
-			v.Pending, v.Nodes = pending, upgradeNodes(e.cfg, nodes)
 			// Halted nodes answer no query, so the chain's plan is best effort.
-			if c, _, err := e.liveCLI(ctx); err != nil {
+			c, rpc, err := e.liveCLI(ctx)
+			if err != nil {
 				v.Warnings = append(v.Warnings, err.Error())
 			} else if v.Plan, err = c.UpgradePlan(ctx); err != nil {
 				v.Warnings = append(v.Warnings, "upgrade plan: "+err.Error())
 			}
+			if rpc != nil && st.Upgrade != nil && allSwapped(st.Nodes) {
+				if chainSt, err := rpc.Status(ctx); err == nil && chainSt.LatestHeight > st.Upgrade.Height {
+					if done, err := sup.CompleteUpgrade(st.Upgrade.Name); err != nil {
+						v.Warnings = append(v.Warnings, "complete upgrade: "+err.Error())
+					} else {
+						st = done
+					}
+				}
+			}
+			v.Pending, v.Completed, v.Nodes = st.Upgrade, st.Completed, upgradeNodes(e.cfg, st.Nodes)
 			return a.print(cmd, v)
 		},
 	}
+}
+
+func allSwapped(nodes []supervisor.NodeStatus) bool {
+	return !slices.ContainsFunc(nodes, func(n supervisor.NodeStatus) bool { return n.Upgrade != supervisor.SwapDone })
 }
 
 // minDeposit is the chain's minimum deposit for a proposal.

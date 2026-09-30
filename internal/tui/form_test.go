@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -259,6 +260,28 @@ func TestFormOptionsComeFromTheCLI(t *testing.T) {
 	drive(t, m, press(m, "n"), func() bool { return m.form.values()["version"] != "" })
 	if got := m.form.command().String(); got != "forklab lab create NAME --profile lsimd --version 0.53.8 --validators 2 --json" {
 		t.Fatalf("profile and version options did not load in turn: %s", got)
+	}
+}
+
+func TestBinaryFetchDefaultsToTheNewestVersion(t *testing.T) {
+	m, _ := openUpgradeForm(t, fixtureRunner())
+	press(m, "esc", "8")
+	drive(t, m, press(m, "f"), func() bool { return m.form.values()["version"] != "" })
+	if got := m.form.command().String(); got != "forklab binary fetch 0.54.0 --profile lsimd --json" {
+		t.Fatalf("fetch form builds %s", got)
+	}
+}
+
+func TestUpgradeVersionsMarkWhatTheNodesRun(t *testing.T) {
+	lab := `[{"name":"xrp","running":true,"version":"11.1.1",
+		"profile":{"name":"xrp","binaries":{"11.1.1":{"path":"/old"},"11.2.0":{"path":"/new"}}},
+		"nodes":[{"index":0,"name":"node0","version":"11.2.0"},{"index":1,"name":"node1","version":"11.2.0"}]}]`
+	opts, err := labVersions.parse(json.RawMessage(lab), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts) != 2 || opts[0].value != "11.1.1" || strings.Contains(opts[0].label, "running") || opts[1].value != "11.2.0" || !strings.HasSuffix(opts[1].label, "(running)") {
+		t.Fatalf("options after an upgrade to 11.2.0 = %+v, want 11.2.0 last and marked running", opts)
 	}
 }
 

@@ -148,7 +148,7 @@ func (e labEnv) consensus(ctx context.Context) (consensusView, error) {
 		}
 		if err != nil {
 			np.Error = err.Error()
-			errs = append(errs, fmt.Errorf("%s: %w", n.Name, err))
+			errs = append(errs, err)
 		} else {
 			np.Up = true
 			if source < 0 {

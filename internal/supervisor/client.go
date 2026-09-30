@@ -63,11 +63,14 @@ func (c *Client) send(req Request) (Response, error) {
 
 func (c *Client) Status() ([]NodeStatus, error) { return c.call(Request{Op: OpStatus}) }
 
-// Upgrade returns the pending upgrade, nil when none, with every node's
-// status.
-func (c *Client) Upgrade() (*Upgrade, []NodeStatus, error) {
-	resp, err := c.send(Request{Op: OpStatus})
-	return resp.Upgrade, resp.Nodes, err
+// Upgrade returns the pending upgrade and the last completed one, each nil
+// when none, with every node's status.
+func (c *Client) Upgrade() (Response, error) { return c.send(Request{Op: OpStatus}) }
+
+// CompleteUpgrade ends the pending upgrade named name once every node runs
+// its binary; it is a no-op when that upgrade is already completed.
+func (c *Client) CompleteUpgrade(name string) (Response, error) {
+	return c.send(Request{Op: OpComplete, Upgrade: &Upgrade{Name: name}})
 }
 
 // SetUpgrade makes u the pending upgrade, or clears it when u is nil. Nodes

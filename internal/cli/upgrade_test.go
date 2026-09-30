@@ -16,6 +16,17 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+func TestUpgradeStatusReportsACompletedUpgrade(t *testing.T) {
+	var b strings.Builder
+	done := &supervisor.Upgrade{Name: "v11.2.0", Height: 48, Version: "11.2.0", AutoSwap: true}
+	if err := (upgradeStatusView{Completed: done}).WriteHuman(&b); err != nil {
+		t.Fatal(err)
+	}
+	if want := "supervisor: last upgrade \"v11.2.0\" to version 11.2.0 completed at height 48\n"; !strings.Contains(b.String(), want) || strings.Contains(b.String(), "auto swap") {
+		t.Errorf("status =\n%s\nwant the line %q and no pending plan", b.String(), want)
+	}
+}
+
 func TestUpgradeScheduleNeedsExactlyOneHeightFlag(t *testing.T) {
 	for _, args := range [][]string{
 		{"upgrade", "schedule", "1.0"},

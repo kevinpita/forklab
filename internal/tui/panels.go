@@ -527,10 +527,21 @@ func (m *Model) plan() *chainPlan {
 
 func upgradeSummary(m *Model) string {
 	p := m.plan()
-	if p == nil {
-		return "none"
+	switch {
+	case p != nil:
+		return fmt.Sprintf("%s@%d", p.Name, p.Height)
+	case m.completedUpgrade() != nil:
+		return "done " + m.completedUpgrade().Name
 	}
-	return fmt.Sprintf("%s@%d", p.Name, p.Height)
+	return "none"
+}
+
+// completedUpgrade is the last completed upgrade while nothing is pending.
+func (m *Model) completedUpgrade() *pendingUpgrade {
+	if m.upgrade == nil || m.upgrade.Pending != nil {
+		return nil
+	}
+	return m.upgrade.Completed
 }
 
 // blocksLeft describes how far the chain is from height h.
@@ -561,7 +572,7 @@ func upgradeMain(m *Model, _, _ int) mainView {
 		if p.Info != "" {
 			lines = append(lines, kv(th, "info", p.Info))
 		}
-	} else {
+	} else if m.completedUpgrade() == nil {
 		lines = append(lines, th.Dim.Render("no upgrade plan on chain"))
 	}
 	if p := u.Pending; p != nil {
@@ -574,6 +585,8 @@ func upgradeMain(m *Model, _, _ int) mainView {
 			line += "  " + kv(th, "proposal", fmt.Sprintf("#%d", p.ProposalID))
 		}
 		lines = append(lines, line, "  "+th.Dim.Render(p.Binary))
+	} else if c := m.completedUpgrade(); c != nil {
+		lines = append(lines, th.Title.Render("LAST")+"  "+th.Val.Render(c.Name)+"  "+kv(th, "to", c.Version)+"  "+th.Good.Render(fmt.Sprintf("completed at %d", c.Height)))
 	}
 	lines = append(lines, "", th.Title.Render(fmt.Sprintf("%-10s %-12s %-9s %-12s %s", "NODE", "VERSION", "STATE", "UPGRADE", "HALT")))
 	for _, n := range u.Nodes {

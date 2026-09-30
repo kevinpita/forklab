@@ -121,8 +121,53 @@ func TestUpgradeSwapsEveryHaltedNode(t *testing.T) {
 			t.Errorf("after adoption node %d = %+v, want the swapped pid %d adopted", i, n, nodes[i].PID)
 		}
 	}
-	if pending, _, err := c.Upgrade(); err != nil || pending == nil || *pending != *plan {
-		t.Errorf("pending after restart = %+v, %v; want %+v", pending, err, plan)
+	if st, err := c.Upgrade(); err != nil || st.Upgrade == nil || *st.Upgrade != *plan || st.Completed != nil {
+		t.Errorf("after restart = %+v, %v; want %+v pending", st, err, plan)
+	}
+}
+
+func TestCompleteUpgradeEndsThePlanOnceEveryNodeSwapped(t *testing.T) {
+	h := newHarness(t)
+	l := h.lab(2, "--halt", "v2:50", "--halt-delay", "300ms")
+	v2 := upgradedBinary(t)
+	c := up(t, l)
+	plan := &supervisor.Upgrade{Name: "v2", Height: 50, Version: "2.0.0", Binary: v2, AutoSwap: true}
+	if _, err := c.SetUpgrade(plan); err != nil {
+		t.Fatal(err)
+	}
+	mustStart(t, c, l, supervisor.All)
+	if st, err := c.CompleteUpgrade("v2"); err == nil || st.Upgrade == nil {
+		t.Fatalf("complete before the swap = %+v, %v; want an error and the plan kept", st, err)
+	}
+	waitUpTo(t, 15*time.Second, "both nodes to be swapped", swapped(c, v2, 0, 1))
+	if _, err := c.CompleteUpgrade("v1"); err == nil {
+		t.Error("completing a plan that is not pending succeeded")
+	}
+
+	st, err := c.CompleteUpgrade("v2")
+	if err != nil || st.Upgrade != nil || st.Completed == nil || *st.Completed != *plan {
+		t.Fatalf("complete = %+v, %v; want no pending plan and %+v completed", st, err, plan)
+	}
+	for i, n := range st.Nodes {
+		if n.Upgrade != supervisor.SwapNone || n.Halt != nil || n.Binary != v2 || n.State != supervisor.StateRunning {
+			t.Errorf("node %d = %+v, want it running %s with no upgrade phase", i, n, v2)
+		}
+	}
+	if _, err := c.CompleteUpgrade("v2"); err != nil {
+		t.Errorf("completing again: %v", err)
+	}
+	data, _ := os.ReadFile(supervisor.Paths{Dir: l.dir}.Upgrade())
+	var saved map[string]json.RawMessage
+	if err := json.Unmarshal(data, &saved); err != nil || saved["plan"] != nil || saved["halts"] != nil || saved["completed"] == nil {
+		t.Errorf("upgrade.json = %s, want only the completed plan", data)
+	}
+
+	old := supervisorPid(t, l)
+	_ = syscall.Kill(old, syscall.SIGKILL)
+	waitFor(t, "old supervisor to die", func() bool { return !alive(old) })
+	c = up(t, l)
+	if st, err := c.Upgrade(); err != nil || st.Upgrade != nil || st.Completed == nil || st.Completed.Name != "v2" || st.Nodes[0].Upgrade != supervisor.SwapNone {
+		t.Errorf("after restart = %+v, %v; want v2 completed and nothing pending", st, err)
 	}
 }
 

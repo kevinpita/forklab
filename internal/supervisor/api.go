@@ -25,6 +25,9 @@ const (
 	// OpUpgrade sets the pending upgrade the supervisor swaps halted nodes
 	// to, or clears it when Request.Upgrade is nil.
 	OpUpgrade Op = "upgrade"
+	// OpComplete ends the pending upgrade Request.Upgrade names once every
+	// node is swapped, keeping it as the completed one.
+	OpComplete Op = "complete"
 )
 
 const All = "all"
@@ -42,12 +45,14 @@ type Request struct {
 	Upgrade *Upgrade      `json:"upgrade,omitempty"`
 }
 
-// Response carries every node's status and the pending upgrade after the
-// operation. Error is set when the operation failed for at least one node.
+// Response carries every node's status, the pending upgrade, and the last
+// completed one after the operation. Error is set when the operation failed
+// for at least one node.
 type Response struct {
-	Error   string       `json:"error,omitempty"`
-	Nodes   []NodeStatus `json:"nodes"`
-	Upgrade *Upgrade     `json:"upgrade,omitempty"`
+	Error     string       `json:"error,omitempty"`
+	Nodes     []NodeStatus `json:"nodes"`
+	Upgrade   *Upgrade     `json:"upgrade,omitempty"`
+	Completed *Upgrade     `json:"completed,omitempty"`
 }
 
 const DefaultStopTimeout = 30 * time.Second

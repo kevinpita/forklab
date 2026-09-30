@@ -72,7 +72,7 @@ func (v labView) WriteHuman(w io.Writer) error {
 	if v.ChainIDSource != "" {
 		chain += " (from " + v.ChainIDSource + ")"
 	}
-	_, _ = fmt.Fprintf(w, "profile %s, version %s, chain %s, %d validators\n\n", v.Profile.Name, v.Version, chain, v.Validators)
+	_, _ = fmt.Fprintf(w, "profile %s, version %s, chain %s, %d validators\n\n", v.Profile.Name, versionText(v.Config), chain, v.Validators)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "NODE\tVERSION\tRPC\tNODE ID\tPORTS")
 	for _, n := range v.Nodes {
@@ -264,9 +264,24 @@ func (l labList) WriteHuman(w io.Writer) error {
 			_, _ = fmt.Fprintf(tw, "%s\t-\t-\t-\t-\t-\t%s, broken: %s\n", r.Name, state, r.Error)
 			continue
 		}
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n", r.Name, r.Profile.Name, r.Mode, r.Version, r.Validators, r.ChainID, state)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n", r.Name, r.Profile.Name, r.Mode, versionText(*r.Config), r.Validators, r.ChainID, state)
 	}
 	return tw.Flush()
+}
+
+// versionText is the version the nodes run, with the creation version when
+// an upgrade or a restart moved them off it.
+func versionText(c lab.Config) string {
+	var running []string
+	for _, n := range c.Nodes {
+		if !slices.Contains(running, n.Version) {
+			running = append(running, n.Version)
+		}
+	}
+	if len(running) == 0 || (len(running) == 1 && running[0] == c.Version) {
+		return c.Version
+	}
+	return strings.Join(running, ", ") + " (created " + c.Version + ")"
 }
 
 func newLabListCmd(a *app) *cobra.Command {

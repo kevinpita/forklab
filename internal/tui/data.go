@@ -161,11 +161,12 @@ type upgradeNode struct {
 }
 
 type upgradeStatus struct {
-	Lab      string          `json:"lab"`
-	Plan     *chainPlan      `json:"plan"`
-	Pending  *pendingUpgrade `json:"pending"`
-	Nodes    []upgradeNode   `json:"nodes"`
-	Warnings []string        `json:"warnings"`
+	Lab       string          `json:"lab"`
+	Plan      *chainPlan      `json:"plan"`
+	Pending   *pendingUpgrade `json:"pending"`
+	Completed *pendingUpgrade `json:"completed"`
+	Nodes     []upgradeNode   `json:"nodes"`
+	Warnings  []string        `json:"warnings"`
 }
 
 type account struct {

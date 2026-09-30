@@ -5,7 +5,31 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/kevinpita/forklab/internal/lab"
 )
+
+func TestLabVersionShowsWhatTheNodesRun(t *testing.T) {
+	cfg := func(versions ...string) lab.Config {
+		c := lab.Config{Version: "11.1.1"}
+		for _, v := range versions {
+			c.Nodes = append(c.Nodes, lab.Node{Version: v})
+		}
+		return c
+	}
+	for _, c := range []struct {
+		cfg  lab.Config
+		want string
+	}{
+		{cfg("11.1.1", "11.1.1"), "11.1.1"},
+		{cfg("11.2.0", "11.2.0"), "11.2.0 (created 11.1.1)"},
+		{cfg("11.2.0", "11.1.1"), "11.2.0, 11.1.1 (created 11.1.1)"},
+	} {
+		if got := versionText(c.cfg); got != c.want {
+			t.Errorf("versionText(%+v) = %q, want %q", c.cfg.Nodes, got, c.want)
+		}
+	}
+}
 
 func TestLabInvalidNameIsAUsageError(t *testing.T) {
 	t.Setenv("FORKLAB_HOME", t.TempDir())

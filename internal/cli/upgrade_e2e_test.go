@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -75,10 +76,16 @@ func badBinaryRecovered(t *testing.T, name, badBin, newBin string) {
 	if code != 1 || !strings.Contains(stdout, "bad binary refuses to start") {
 		t.Fatalf("schedule onto a bad binary: code %d, %s; want the swap failure with the binary's output", code, stdout)
 	}
-	st := forklabData[upgradeStatusView](t, "upgrade", "status", "--lab", name)
-	for _, n := range st.Nodes {
-		if n.Phase != supervisor.SwapFailed {
-			t.Fatalf("%s = %+v, want swap_failed", n.Name, n)
+	// schedule returns on the first failed swap; the other node may still
+	// be halting.
+	var st upgradeStatusView
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(time.Second) {
+		st = forklabData[upgradeStatusView](t, "upgrade", "status", "--lab", name)
+		if !slices.ContainsFunc(st.Nodes, func(n upgradeNode) bool { return n.Phase != supervisor.SwapFailed }) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("nodes = %+v, want every one swap_failed", st.Nodes)
 		}
 	}
 	if code, stdout, _ := run("upgrade", "status", "--lab", name); code != 0 || !strings.Contains(stdout, "(see --json)") {
@@ -106,6 +113,9 @@ func badBinaryRecovered(t *testing.T, name, badBin, newBin string) {
 		t.Fatal(err)
 	}
 	time.Sleep(time.Second)
+	if _, err := ensureSupervisor(t.Context(), dir); err != nil {
+		t.Fatal(err)
+	}
 	st = forklabData[upgradeStatusView](t, "upgrade", "status", "--lab", name)
 	time.Sleep(10 * time.Second)
 	nodes = forklabData[[]supervisor.NodeStatus](t, "node", "list", "--lab", dir)
@@ -154,22 +164,14 @@ func interrupted(t *testing.T, name, newBin string) {
 	if st.Pending == nil || st.Pending.ProposalID != 1 {
 		t.Fatalf("after the interrupt status = %+v, want the plan registered with proposal 1", st)
 	}
+	planHeight := st.Pending.Height
 	if code, stdout, _ := run("upgrade", "schedule", exrpdNew, "--in", planIn, "--lab", name, "--json"); code != 1 || !strings.Contains(stdout, "still in VOTING_PERIOD") {
 		t.Errorf("second schedule while voting: code %d, %s; want it refused", code, stdout)
 	}
 	deadline = time.Now().Add(3 * time.Minute)
 	for {
 		st = forklabData[upgradeStatusView](t, "upgrade", "status", "--lab", name)
-		swapped := 0
-		for _, n := range st.Nodes {
-			if n.Phase == supervisor.SwapFailed {
-				t.Fatalf("%s: %s", n.Name, n.SwapError)
-			}
-			if n.Phase == supervisor.SwapDone {
-				swapped++
-			}
-		}
-		if swapped == len(st.Nodes) {
+		if swappedOrCompleted(t, st) {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -177,7 +179,24 @@ func interrupted(t *testing.T, name, newBin string) {
 		}
 		time.Sleep(time.Second)
 	}
-	checkUpgraded(t, name, dir, c, st.Pending.Height, newBin)
+	checkUpgraded(t, name, dir, c, planHeight, newBin)
+}
+
+// swappedOrCompleted reports whether every node is swapped, or an upgrade
+// status call already completed the upgrade, which clears the phases.
+func swappedOrCompleted(t *testing.T, st upgradeStatusView) bool {
+	t.Helper()
+	if st.Completed != nil {
+		return true
+	}
+	done := true
+	for _, n := range st.Nodes {
+		if n.Phase == supervisor.SwapFailed {
+			t.Fatalf("%s: %s", n.Name, n.SwapError)
+		}
+		done = done && n.Phase == supervisor.SwapDone
+	}
+	return done
 }
 
 // labChainID keeps the v11.2.0 handler off its mainnet-only escrow work,
@@ -243,13 +262,16 @@ func checkUpgraded(t *testing.T, name, dir string, c lab.Config, planHeight int6
 	if st.Plan != nil {
 		t.Errorf("chain still schedules %+v after applying it", st.Plan)
 	}
-	if st.Pending == nil || st.Pending.Version != exrpdNew {
-		t.Errorf("supervisor pending = %+v, want the %s plan kept as the record", st.Pending, exrpdNew)
+	if st.Pending != nil || st.Completed == nil || st.Completed.Version != exrpdNew || st.Completed.Height != planHeight {
+		t.Errorf("supervisor pending = %+v, completed = %+v; want the %s plan completed", st.Pending, st.Completed, exrpdNew)
 	}
 	for _, n := range st.Nodes {
-		if n.Version != exrpdNew || n.Binary != newBin || n.State != supervisor.StateRunning || n.Phase != supervisor.SwapDone {
-			t.Errorf("%s = %+v, want version %s running %s and swapped", n.Name, n, exrpdNew, newBin)
+		if n.Version != exrpdNew || n.Binary != newBin || n.State != supervisor.StateRunning || n.Phase != supervisor.SwapNone {
+			t.Errorf("%s = %+v, want version %s running %s with the upgrade over", n.Name, n, exrpdNew, newBin)
 		}
+	}
+	if code, stdout, _ := run("upgrade", "status", "--lab", name); code != 0 || !strings.Contains(stdout, fmt.Sprintf("last upgrade \"v%s\" to version %s completed at height %d", exrpdNew, exrpdNew, planHeight)) {
+		t.Errorf("human status: code %d\n%s", code, stdout)
 	}
 	applying := fmt.Sprintf(`applying upgrade "v%s" at height: %d`, exrpdNew, planHeight)
 	needed := fmt.Sprintf(`UPGRADE "v%s" NEEDED at height: %d`, exrpdNew, planHeight)
@@ -297,7 +319,7 @@ func autoSwap(t *testing.T, name, newBin string) {
 		}
 	}
 	st := forklabData[upgradeStatusView](t, "upgrade", "status", "--lab", name)
-	if st.Pending != nil || st.Plan != nil {
+	if st.Pending != nil || st.Plan != nil || st.Completed != nil {
 		t.Errorf("after reset status = %+v, want no plan anywhere", st)
 	}
 	for _, n := range st.Nodes {
@@ -390,21 +412,16 @@ func supervisorKilled(t *testing.T, name, newBin string) {
 	live, _ := supervisor.LiveNodes(dir)
 	t.Logf("supervisor %d killed before the halt; nodes still running after it: %v", old, live)
 
-	// upgrade status needs a supervisor, so it spawns one, which adopts the
-	// halted nodes and finishes the swap.
+	// upgrade status only dials, so the test spawns the supervisor any
+	// mutating command would; it adopts the halted nodes and finishes the
+	// swap.
+	if _, err := ensureSupervisor(t.Context(), dir); err != nil {
+		t.Fatal(err)
+	}
 	deadline = time.Now().Add(3 * time.Minute)
 	for {
 		st := forklabData[upgradeStatusView](t, "upgrade", "status", "--lab", name)
-		swapped := 0
-		for _, n := range st.Nodes {
-			if n.Phase == supervisor.SwapFailed {
-				t.Fatalf("%s: %s", n.Name, n.SwapError)
-			}
-			if n.Phase == supervisor.SwapDone {
-				swapped++
-			}
-		}
-		if swapped == len(st.Nodes) {
+		if swappedOrCompleted(t, st) {
 			break
 		}
 		if time.Now().After(deadline) {

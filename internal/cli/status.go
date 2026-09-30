@@ -140,7 +140,7 @@ func (e labEnv) status(ctx context.Context) (statusView, error) {
 		ns := nodeState{Name: n.Name, RPCPort: n.RPCPort()}
 		st, err := e.clients[i].Status(ctx)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", n.Name, err))
+			errs = append(errs, err)
 			ns.Error = err.Error()
 			v.Nodes = append(v.Nodes, ns)
 			continue

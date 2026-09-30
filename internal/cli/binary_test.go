@@ -34,6 +34,26 @@ func chainTarGz(t *testing.T, versionOutput string) []byte {
 	return buf.Bytes()
 }
 
+func TestDownloadProgressPicksUnitsBySize(t *testing.T) {
+	for _, c := range []struct {
+		done, total int64
+		want        string
+	}{
+		{300, 1000, "\rdownloading 30% (300/1000 B)"},
+		{300 << 10, 700 << 10, "\rdownloading 42% (300.0/700.0 KiB)"},
+		{35 << 20, 70 << 20, "\rdownloading 50% (35.0/70.0 MiB)"},
+		{1 << 30, 3 << 30, "\rdownloading 33% (1.0/3.0 GiB)"},
+		{5 << 20, 0, "\rdownloading 5.0 MiB"},
+		{512, 0, "\rdownloading 512 B"},
+	} {
+		var buf bytes.Buffer
+		(&progress{w: &buf, last: -1}).update(c.done, c.total)
+		if buf.String() != c.want {
+			t.Errorf("update(%d, %d) = %q, want %q", c.done, c.total, buf.String(), c.want)
+		}
+	}
+}
+
 type binaryEnvelope[T any] struct {
 	OK    bool `json:"ok"`
 	Data  T    `json:"data"`

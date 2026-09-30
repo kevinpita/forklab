@@ -44,11 +44,18 @@ type supervisor struct {
 	forward       LineSubscriber
 	recordVersion func(index int, version string) error
 
-	// upgrade is the pending upgrade, mirrored in upgrade.json.
-	upMu    sync.Mutex
-	upgrade *Upgrade
+	// upgrade is the pending upgrade and completed the last one every node
+	// was swapped to, both mirrored in upgrade.json.
+	upMu      sync.Mutex
+	upgrade   *Upgrade
+	completed *Upgrade
+	// planOps serializes the ops that change the plan, so each reconciles
+	// the nodes with the plan it set.
+	planOps sync.Mutex
 
 	saveMu sync.Mutex
+	// recorded is the version last passed to recordVersion, by node index.
+	recorded map[int]string
 	// closing is set by down and exit so a node op racing them cannot spawn
 	// a process the shutdown never sees.
 	closing  atomic.Bool
@@ -104,7 +111,7 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	s.upgrade = st.Plan
+	s.upgrade, s.completed = st.Plan, st.Completed
 	for _, spec := range specs {
 		n := &node{log: s.log, sub: s, spec: spec}
 		if h, ok := st.Halts[spec.Index]; ok {
@@ -219,10 +226,19 @@ func (s *supervisor) handle(req Request) (resp Response, quit bool) {
 		quit = true
 	case OpUpgrade:
 		err = s.setUpgrade(req.Upgrade)
+	case OpComplete:
+		if req.Upgrade == nil {
+			err = errors.New("complete: no upgrade named")
+		} else {
+			err = s.complete(req.Upgrade.Name)
+		}
 	default:
 		err = fmt.Errorf("unknown op %q", req.Op)
 	}
-	resp.Nodes, resp.Upgrade = s.statuses(), s.pending()
+	resp.Nodes = s.statuses()
+	s.upMu.Lock()
+	resp.Upgrade, resp.Completed = s.upgrade, s.completed
+	s.upMu.Unlock()
 	if err != nil {
 		resp.Error = err.Error()
 	}
@@ -359,8 +375,10 @@ func logSince(path string, offset int64) string {
 	return "\nit logged:\n  " + strings.Join(lines, "\n  ")
 }
 
-// record tells RecordVersion which profile version node n now runs. Calls
-// are serialized: the callback rewrites lab.yaml, and nodes swap
+// record tells RecordVersion which profile version node n now runs, once
+// per node and version: a swap that finishes while a new supervisor's
+// startup reconcile waits on the node would otherwise be recorded by both.
+// Calls are serialized: the callback rewrites lab.yaml, and nodes swap
 // concurrently.
 func (s *supervisor) record(n *node, version string) error {
 	if version == "" || s.recordVersion == nil {
@@ -368,7 +386,17 @@ func (s *supervisor) record(n *node, version string) error {
 	}
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
-	return s.recordVersion(n.spec.Index, version)
+	if s.recorded[n.spec.Index] == version {
+		return nil
+	}
+	if err := s.recordVersion(n.spec.Index, version); err != nil {
+		return err
+	}
+	if s.recorded == nil {
+		s.recorded = map[int]string{}
+	}
+	s.recorded[n.spec.Index] = version
+	return nil
 }
 
 func deref(code *int) any {

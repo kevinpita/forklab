@@ -25,13 +25,14 @@ type Upgrade struct {
 	ProposalID uint64 `json:"proposal_id,omitempty"`
 }
 
-// upgradeState is <lab>/upgrade.json: the pending plan and the halt each
-// node logged, by index. The halts are kept because the log offset moves
-// past a halt line long before the swap changes anything, so a supervisor
-// started in between would otherwise never see it.
+// upgradeState is <lab>/upgrade.json: the pending plan, the halt each node
+// logged, by index, and the last completed plan. The halts are kept because
+// the log offset moves past a halt line long before the swap changes
+// anything, so a supervisor started in between would otherwise never see it.
 type upgradeState struct {
-	Plan  *Upgrade     `json:"plan,omitempty"`
-	Halts map[int]Halt `json:"halts,omitempty"`
+	Plan      *Upgrade     `json:"plan,omitempty"`
+	Halts     map[int]Halt `json:"halts,omitempty"`
+	Completed *Upgrade     `json:"completed,omitempty"`
 }
 
 func (p Paths) Upgrade() string { return filepath.Join(p.Dir, "upgrade.json") }
@@ -62,7 +63,7 @@ func LoadUpgrade(labDir string) (*Upgrade, error) {
 // nothing to keep.
 func saveUpgradeState(labDir string, st upgradeState) error {
 	path := Paths{labDir}.Upgrade()
-	if st.Plan == nil && len(st.Halts) == 0 {
+	if st.Plan == nil && len(st.Halts) == 0 && st.Completed == nil {
 		err := os.Remove(path)
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -187,7 +188,7 @@ func (s *supervisor) pending() *Upgrade {
 func (s *supervisor) saveState() {
 	s.upMu.Lock()
 	defer s.upMu.Unlock()
-	st := upgradeState{Plan: s.upgrade}
+	st := upgradeState{Plan: s.upgrade, Completed: s.completed}
 	for _, n := range s.nodes {
 		if _, h := n.swapState(); h != nil {
 			if st.Halts == nil {
@@ -277,6 +278,8 @@ func (s *supervisor) setUpgrade(up *Upgrade) error {
 			return err
 		}
 	}
+	s.planOps.Lock()
+	defer s.planOps.Unlock()
 	s.upMu.Lock()
 	s.upgrade = up
 	s.upMu.Unlock()
@@ -287,6 +290,38 @@ func (s *supervisor) setUpgrade(up *Upgrade) error {
 	}
 	for _, n := range s.nodes {
 		s.reconcile(n, up)
+	}
+	s.saveState()
+	return nil
+}
+
+// complete moves the pending upgrade named name to completed once every
+// node is swapped, and forgets the halts. The caller has seen the chain go
+// past the plan height, which the supervisor cannot see. Completing the
+// last completed upgrade again changes nothing.
+func (s *supervisor) complete(name string) error {
+	s.planOps.Lock()
+	defer s.planOps.Unlock()
+	s.upMu.Lock()
+	up, done := s.upgrade, s.completed
+	s.upMu.Unlock()
+	switch {
+	case up == nil && done != nil && done.Name == name:
+		return nil
+	case up == nil || up.Name != name:
+		return fmt.Errorf("upgrade %q is not pending", name)
+	}
+	for _, n := range s.nodes {
+		if phase, _ := n.swapState(); phase != SwapDone {
+			return fmt.Errorf("upgrade %q: %s is not swapped", name, n.spec.Name)
+		}
+	}
+	s.upMu.Lock()
+	s.upgrade, s.completed = nil, up
+	s.upMu.Unlock()
+	s.log.Printf("upgrade %q at height %d completed", up.Name, up.Height)
+	for _, n := range s.nodes {
+		s.reconcile(n, nil)
 	}
 	s.saveState()
 	return nil

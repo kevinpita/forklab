@@ -81,9 +81,10 @@ func versionLess(a, b string) bool {
 
 func notDigit(r rune) bool { return r < '0' || r > '9' }
 
-// versionOptions are a profile's binary versions, newest first; current
-// sorts last and says so, since upgrading to it is a no-op.
-func versionOptions(d profileDoc, current string, kinds ...string) []option {
+// versionOptions are a profile's binary versions, newest first; the
+// versions nodes run sort last and say so, since upgrading to one is a
+// no-op.
+func versionOptions(d profileDoc, running []string, kinds ...string) []option {
 	var vs []string
 	for v, b := range d.Binaries {
 		if len(kinds) == 0 || slices.Contains(kinds, binaryKind(b)) {
@@ -91,15 +92,15 @@ func versionOptions(d profileDoc, current string, kinds ...string) []option {
 		}
 	}
 	sort.Slice(vs, func(i, j int) bool {
-		if (vs[i] == current) != (vs[j] == current) {
-			return vs[j] == current
+		if ri, rj := slices.Contains(running, vs[i]), slices.Contains(running, vs[j]); ri != rj {
+			return rj
 		}
 		return versionLess(vs[j], vs[i])
 	})
 	opts := make([]option, 0, len(vs))
 	for _, v := range vs {
 		label := v + "  " + binaryKind(d.Binaries[v])
-		if v == current {
+		if slices.Contains(running, v) {
 			label += "  (running)"
 		}
 		opts = append(opts, option{value: v, label: label})
@@ -125,8 +126,9 @@ var profilesSource = &source{
 }
 
 // profileVersions lists the binary versions of the profile the field key
-// names.
-func profileVersions(key string, kinds ...string) *source {
+// names, newest first. oldestFirst reverses that, so a new lab starts on the
+// version an upgrade rehearsal upgrades from.
+func profileVersions(key string, oldestFirst bool, kinds ...string) *source {
 	return &source{
 		cmd: func(v values) Command {
 			if v[key] == "" {
@@ -141,7 +143,11 @@ func profileVersions(key string, kinds ...string) *source {
 			if err := json.Unmarshal(data, &p); err != nil {
 				return nil, err
 			}
-			return versionOptions(p.Profile, "", kinds...), nil
+			opts := versionOptions(p.Profile, nil, kinds...)
+			if oldestFirst {
+				slices.Reverse(opts)
+			}
+			return opts, nil
 		},
 	}
 }
@@ -161,7 +167,8 @@ func activeLab(labs []labInfo) (labInfo, bool) {
 }
 
 // labVersions lists the versions of the profile snapshot the active lab
-// was created with, which is what upgrade and restart resolve against.
+// was created with, which is what upgrade and restart resolve against,
+// marking the ones its nodes run now.
 var labVersions = &source{
 	cmd: func(values) Command { return Command{"lab", "list"} },
 	parse: func(data json.RawMessage, _ values) ([]option, error) {
@@ -182,7 +189,11 @@ var labVersions = &source{
 		}
 		for _, x := range labs {
 			if x.Name == l.Name {
-				return versionOptions(x.Profile, l.Version), nil
+				var running []string
+				for _, n := range l.Nodes {
+					running = append(running, n.Version)
+				}
+				return versionOptions(x.Profile, running), nil
 			}
 		}
 		return nil, nil
@@ -334,7 +345,7 @@ func labCreateSpec(m *Model, wizard bool) *formSpec {
 	}
 	fields := []fieldSpec{
 		{key: "profile", label: "Profile", kind: fieldSelect, src: profilesSource, hint: "the chain to run"},
-		{key: "version", label: "Version", kind: fieldSelect, src: profileVersions("profile"), hint: "binary every node starts with"},
+		{key: "version", label: "Version", kind: fieldSelect, src: profileVersions("profile", true), hint: "binary every node starts with"},
 		{key: "validators", label: "Validators", kind: fieldNumber, def: "2"},
 		{
 			key: "mode", label: "Genesis", kind: fieldSelect, def: "fresh",
@@ -438,7 +449,7 @@ func profileEditSpec(m *Model) *formSpec {
 	_ = json.Unmarshal(p.Profile, &doc)
 	fields := slices.Clone(profileBinaryFields)
 	var have []string
-	for _, o := range versionOptions(doc, "") {
+	for _, o := range versionOptions(doc, nil) {
 		have = append(have, o.value)
 	}
 	if len(have) > 0 {
@@ -630,9 +641,9 @@ func binarySpec(verb string) func(*Model) *formSpec {
 		if l, ok := activeLab(m.labs); ok && prof == "" {
 			prof = l.Profile.Name
 		}
-		src, title := profileVersions("profile"), "Fetch binary"
+		src, title := profileVersions("profile", false), "Fetch binary"
 		if verb == "build" {
-			src, title = profileVersions("profile", "git", "src"), "Build binary"
+			src, title = profileVersions("profile", false, "git", "src"), "Build binary"
 		}
 		return &formSpec{
 			title: title,

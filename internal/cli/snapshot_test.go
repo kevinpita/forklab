@@ -21,7 +21,7 @@ func TestSnapshotFetchEndsTheProgressLineBeforeTheResult(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, term.String())
 	}
 	out := term.String()
-	if !strings.Contains(out, "downloading 100%") || !strings.Contains(out, "MiB)\narchive ") || !strings.HasSuffix(out, "\n") || strings.Contains(out, "\n\n") {
+	if !strings.Contains(out, "downloading 100%") || !strings.Contains(out, "(4.0/4.0 KiB)\narchive ") || !strings.HasSuffix(out, "\n") || strings.Contains(out, "\n\n") {
 		t.Fatalf("progress and result are not on their own lines:\n%q", out)
 	}
 }

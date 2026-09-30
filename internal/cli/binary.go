@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/kevinpita/forklab/internal/binary"
@@ -175,10 +177,33 @@ func (p *progress) update(done, total int64) {
 	}
 	p.last = step
 	if total > 0 {
-		_, _ = fmt.Fprintf(p.w, "\rdownloading %d%% (%d/%d MiB)", step, done/mib, total/mib)
+		_, _ = fmt.Fprintf(p.w, "\rdownloading %d%% (%s)", step, byteSizes(done, total))
 	} else {
-		_, _ = fmt.Fprintf(p.w, "\rdownloading %d MiB", step)
+		_, _ = fmt.Fprintf(p.w, "\rdownloading %s", byteSizes(done))
 	}
+}
+
+// byteSizes writes sizes as "a/b unit" in the unit that suits the last one,
+// so a small archive does not read as 0 MiB.
+func byteSizes(sizes ...int64) string {
+	unit, name := int64(1), "B"
+	for _, u := range []struct {
+		size int64
+		name string
+	}{{1 << 30, "GiB"}, {1 << 20, "MiB"}, {1 << 10, "KiB"}} {
+		if sizes[len(sizes)-1] >= u.size {
+			unit, name = u.size, u.name
+			break
+		}
+	}
+	parts := make([]string, len(sizes))
+	for i, n := range sizes {
+		parts[i] = strconv.FormatInt(n, 10)
+		if unit > 1 {
+			parts[i] = strconv.FormatFloat(float64(n)/float64(unit), 'f', 1, 64)
+		}
+	}
+	return strings.Join(parts, "/") + " " + name
 }
 
 func (p *progress) end() {

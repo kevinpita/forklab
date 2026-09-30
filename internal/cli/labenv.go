@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/kevinpita/forklab/internal/chain"
@@ -81,13 +84,44 @@ func (e labEnv) live(ctx context.Context) (int, error) {
 		if err == nil {
 			return i, nil
 		}
-		errs = append(errs, fmt.Errorf("%s: %w", e.cfg.Nodes[i].Name, err))
+		errs = append(errs, err)
 	}
 	return 0, e.notRunning(errs)
 }
 
+// notRunning is the error when no node answers; errs holds each node's
+// error, in node order. It names each node's RPC port and the short cause,
+// once when every node failed the same way.
 func (e labEnv) notRunning(errs []error) error {
-	return fmt.Errorf("lab %s: %w: no node answers: %w", e.cfg.Name, output.ErrLabNotRunning, errors.Join(errs...))
+	reasons := make([]string, len(errs))
+	for i, err := range errs {
+		reasons[i] = rpcFailure(err)
+	}
+	same := !slices.ContainsFunc(reasons, func(r string) bool { return r != reasons[0] })
+	parts := make([]string, len(errs))
+	for i, n := range e.cfg.Nodes[:len(errs)] {
+		parts[i] = fmt.Sprintf("%s :%d", n.Name, n.RPCPort())
+		if !same {
+			parts[i] += ": " + reasons[i]
+		}
+	}
+	detail := strings.Join(parts, ", ")
+	if same {
+		detail += ": " + reasons[0]
+	}
+	return fmt.Errorf("lab %s: %w: no node answers (%s)", e.cfg.Name, output.ErrLabNotRunning, detail)
+}
+
+// rpcFailure is the short cause of a failed RPC call.
+func rpcFailure(err error) string {
+	var netErr net.Error
+	switch {
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "connection refused"
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
+		return "timeout"
+	}
+	return err.Error()
 }
 
 // cli points the chain binary at node i, with node0's home for client

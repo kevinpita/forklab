@@ -112,6 +112,18 @@ func TestDecodeCapturedCLIOutput(t *testing.T) {
 	}
 }
 
+func TestUpgradesPanelShowsACompletedUpgrade(t *testing.T) {
+	m := loadedModel(t, buildTheme("ansi", true))
+	feed(t, m, loadUpgrade, "upgrade_status_completed.json")
+	v := ansi.Strip(strings.Join(upgradeMain(m, 100, 30).lines, "\n"))
+	if !strings.HasPrefix(v, "LAST  v11.2.0  to 11.2.0  completed at 42\n") || strings.Contains(v, "no upgrade plan") || strings.Contains(v, "SWAP") || strings.Contains(v, "swapped") {
+		t.Errorf("Upgrades after a completed upgrade:\n%s", v)
+	}
+	if got := upgradeSummary(m); got != "done v11.2.0" {
+		t.Errorf("Upgrades title = %q, want done v11.2.0", got)
+	}
+}
+
 func TestErrorEnvelopeCarriesCode(t *testing.T) {
 	r := envelopeData(t, "err_usage.json")
 	var ce *CLIError
