@@ -35,3 +35,6 @@ fresh_patches:
 fork_patches:
   - '.app_state.ratelimit.hour_epoch.epoch_start_height = (.initial_height|tonumber)'
   - '.app_state.bank.denom_metadata |= map(if .denom_units[0].denom != .base then (.denom_units[0].denom = .base | .display = .base) else . end)'
+  # export writes checksummed precompile addresses while token pairs are
+  # lowercase, and `genesis validate` compares them as strings.
+  - '.app_state.erc20.native_precompiles |= map(ascii_downcase)'

@@ -31,7 +31,7 @@ func TestAddKeysKeepsMnemonicsOutOfTheLog(t *testing.T) {
 		partial: dir,
 		cli:     chainCLI{ctx: context.Background(), bin: bin, log: &log},
 	}
-	keys, err := b.addKeys()
+	keys, err := b.addKeys(ModeFresh)
 	if err != nil {
 		t.Fatal(err)
 	}

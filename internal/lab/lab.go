@@ -30,7 +30,10 @@ var ErrNotFound = errors.New("lab not found")
 
 type Mode string
 
-const ModeFresh Mode = "fresh"
+const (
+	ModeFresh Mode = "fresh"
+	ModeFork  Mode = "fork"
+)
 
 // Config is lab.yaml. Profile is a copy of the profile the lab was created
 // with, so later edits to the profile do not change an existing lab.
@@ -42,8 +45,19 @@ type Config struct {
 	Validators int              `yaml:"validators" json:"validators"`
 	CreatedAt  time.Time        `yaml:"created_at" json:"created_at"`
 	Profile    profile.Document `yaml:"profile" json:"profile"`
+	Fork       *Fork            `yaml:"fork,omitempty" json:"fork,omitempty"`
 	Nodes      []Node           `yaml:"nodes" json:"nodes"`
 	Accounts   []Account        `yaml:"accounts" json:"accounts"`
+}
+
+// Fork records the chain state a fork lab started from.
+type Fork struct {
+	// Source is the --fork argument: a profile snapshot name, a URL, or a file.
+	Source string `yaml:"source" json:"source"`
+	// Archive is the cached snapshot archive.
+	Archive string `yaml:"archive" json:"archive"`
+	// Height is the exported block height, which the lab continues from.
+	Height int64 `yaml:"height" json:"height"`
 }
 
 // Node is one validator node. Its home is <lab>/<Name>.
@@ -53,8 +67,11 @@ type Node struct {
 	// Version is the profile binary version the node runs.
 	Version string `yaml:"version" json:"version"`
 	NodeID  string `yaml:"node_id" json:"node_id"`
-	// Validator is the key name of the node's operator account.
-	Validator string `yaml:"validator" json:"validator"`
+	// Validator is the key name of the node's operator account in fresh
+	// mode. A fork node took over a mainnet validator whose operator key is
+	// not ours, so it has Operator (the valoper address) instead.
+	Validator string `yaml:"validator,omitempty" json:"validator,omitempty"`
+	Operator  string `yaml:"operator,omitempty" json:"operator,omitempty"`
 	Ports     []Port `yaml:"ports" json:"ports"`
 }
 

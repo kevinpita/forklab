@@ -273,16 +273,9 @@ func (t *takeover) loadStaking() error {
 	if err != nil {
 		return err
 	}
-	var params struct {
-		BondDenom string `json:"bond_denom"`
+	if t.bondDenom, err = t.g.BondDenom(); err != nil {
+		return err
 	}
-	if err := st.get("params", &params); err != nil {
-		return fmt.Errorf("staking: %w", err)
-	}
-	if params.BondDenom == "" {
-		return errors.New("staking: params.bond_denom is empty")
-	}
-	t.bondDenom = params.BondDenom
 	raws, err := st.list("validators")
 	if err != nil {
 		return fmt.Errorf("staking: %w", err)

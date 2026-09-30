@@ -96,6 +96,65 @@ func (g *Genesis) InitialHeight() (*big.Int, error) {
 	return parseInt(n.String())
 }
 
+// BondDenom returns the staking bond denom.
+func (g *Genesis) BondDenom() (string, error) {
+	st, err := g.module("staking")
+	if err != nil {
+		return "", err
+	}
+	var params struct {
+		BondDenom string `json:"bond_denom"`
+	}
+	if err := st.get("params", &params); err != nil {
+		return "", fmt.Errorf("staking: %w", err)
+	}
+	if params.BondDenom == "" {
+		return "", errors.New("staking: params.bond_denom is empty")
+	}
+	return params.BondDenom, nil
+}
+
+// Supply returns the bank supply of denom. When the export carries no supply
+// list the bank module computes it from balances, and so does this.
+func (g *Genesis) Supply(denom string) (*big.Int, error) {
+	bank, err := g.module("bank")
+	if err != nil {
+		return nil, err
+	}
+	var supply []coinJSON
+	if raw, ok := bank["supply"]; ok {
+		if err := json.Unmarshal(raw, &supply); err != nil {
+			return nil, fmt.Errorf("bank supply: %w", err)
+		}
+	}
+	total := new(big.Int)
+	if len(supply) > 0 {
+		for _, c := range supply {
+			if c.Denom == denom {
+				return parseInt(c.Amount)
+			}
+		}
+		return total, nil
+	}
+	var balances []balanceJSON
+	if err := bank.get("balances", &balances); err != nil {
+		return nil, fmt.Errorf("bank: %w", err)
+	}
+	for _, b := range balances {
+		for _, c := range b.Coins {
+			if c.Denom != denom {
+				continue
+			}
+			n, err := parseInt(c.Amount)
+			if err != nil {
+				return nil, fmt.Errorf("bank balance %s: %w", b.Address, err)
+			}
+			total.Add(total, n)
+		}
+	}
+	return total, nil
+}
+
 // sameContent reports whether a top-level copy, when it holds anything,
 // equals the value under .consensus, ignoring key order.
 func sameContent(copy, src json.RawMessage) error {

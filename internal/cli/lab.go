@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -17,6 +20,7 @@ import (
 	"github.com/kevinpita/forklab/internal/lab"
 	"github.com/kevinpita/forklab/internal/paths"
 	"github.com/kevinpita/forklab/internal/profile"
+	"github.com/kevinpita/forklab/internal/snapshot"
 	"github.com/kevinpita/forklab/internal/supervisor"
 	"github.com/spf13/cobra"
 )
@@ -42,9 +46,12 @@ func running(dir string) bool {
 
 type labView struct {
 	lab.Config
-	Dir       string         `json:"dir"`
-	Running   bool           `json:"running"`
-	Mnemonics []lab.Mnemonic `json:"mnemonics,omitempty"`
+	Dir     string `json:"dir"`
+	Running bool   `json:"running"`
+	// ChainIDSource says where a new lab's chain ID came from: the
+	// --chain-id flag or the profile.
+	ChainIDSource string         `json:"chain_id_source,omitempty"`
+	Mnemonics     []lab.Mnemonic `json:"mnemonics,omitempty"`
 }
 
 func (v labView) WriteHuman(w io.Writer) error {
@@ -53,7 +60,11 @@ func (v labView) WriteHuman(w io.Writer) error {
 		state = "running"
 	}
 	_, _ = fmt.Fprintf(w, "lab %s (%s, %s) at %s\n", v.Name, v.Mode, state, v.Dir)
-	_, _ = fmt.Fprintf(w, "profile %s, version %s, chain %s, %d validators\n\n", v.Profile.Name, v.Version, v.ChainID, v.Validators)
+	chain := v.ChainID
+	if v.ChainIDSource != "" {
+		chain += " (from " + v.ChainIDSource + ")"
+	}
+	_, _ = fmt.Fprintf(w, "profile %s, version %s, chain %s, %d validators\n\n", v.Profile.Name, v.Version, chain, v.Validators)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "NODE\tVERSION\tRPC\tNODE ID\tPORTS")
 	for _, n := range v.Nodes {
@@ -86,10 +97,11 @@ func (v labView) WriteHuman(w io.Writer) error {
 
 func newLabCreateCmd(a *app) *cobra.Command {
 	var in lab.CreateInput
-	var profileName string
+	var profileName, fork string
+	var keepWork bool
 	cmd := &cobra.Command{
 		Use:   "create <name>",
-		Short: "Create a lab with a fresh genesis",
+		Short: "Create a lab with a fresh genesis, or one forked from a snapshot",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := profile.DefaultStore()
@@ -99,7 +111,8 @@ func newLabCreateCmd(a *app) *cobra.Command {
 			if in.Profile, err = s.Get(profileName); err != nil {
 				return err
 			}
-			if _, ok := in.Profile.Profile.Binaries[in.Version]; !ok {
+			p := in.Profile.Profile
+			if _, ok := p.Binaries[in.Version]; !ok {
 				return output.Usagef("profile %s has no binary version %s", profileName, in.Version)
 			}
 			if in.Validators < 1 {
@@ -108,15 +121,38 @@ func newLabCreateCmd(a *app) *cobra.Command {
 			if in.TestAccounts < 0 {
 				return output.Usagef("--test-accounts must not be negative")
 			}
-			if in.ChainID == "" {
-				in.ChainID = in.Profile.Profile.ChainID
-			}
 			in.Name = args[0]
 			if err := lab.CheckName(in.Name); err != nil {
 				return output.Usage(err)
 			}
+			root, err := paths.Home()
+			if err != nil {
+				return err
+			}
+			chainIDSource := "--chain-id"
+			if in.ChainID == "" {
+				in.ChainID, chainIDSource = p.ChainID, "profile "+p.Name
+			}
+			if fork != "" {
+				vars := profile.Vars{Version: in.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, ChainID: in.ChainID}
+				src, err := forkSource(p, fork, vars)
+				if err != nil {
+					return output.Usage(err)
+				}
+				if err := snapshot.Reachable(cmd.Context(), nil, src, filepath.Join(root, "snapshots")); err != nil {
+					return err
+				}
+				if !a.json {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "forking %s as chain %s (from %s)\n", src, in.ChainID, chainIDSource)
+				}
+				in.Fork = &lab.ForkInput{Source: fork, Export: func(ctx context.Context, bin string) (string, string, error) {
+					return exportSnapshot(ctx, a, cmd.ErrOrStderr(), root, src, snapshot.ExportInput{
+						Binary: bin, Version: in.Version, ChainID: in.ChainID, Args: expand(p.ExportArgs, vars), KeepWork: keepWork,
+					})
+				}}
+			}
 			in.Binary = func(ctx context.Context) (string, error) {
-				b, err := resolveBinary(ctx, a, cmd.ErrOrStderr(), in.Profile.Profile, in.Version, binary.Options{})
+				b, err := resolveBinary(ctx, a, cmd.ErrOrStderr(), p, in.Version, binary.Options{})
 				return b.Path, err
 			}
 			l, err := labs()
@@ -127,7 +163,7 @@ func newLabCreateCmd(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.print(cmd, labView{Config: c, Dir: dir})
+			return a.print(cmd, labView{Config: c, Dir: dir, ChainIDSource: chainIDSource})
 		},
 	}
 	cmd.Flags().StringVar(&profileName, "profile", "", "profile name (required)")
@@ -135,9 +171,65 @@ func newLabCreateCmd(a *app) *cobra.Command {
 	cmd.Flags().IntVar(&in.Validators, "validators", 2, "number of validator nodes")
 	cmd.Flags().IntVar(&in.TestAccounts, "test-accounts", 5, "number of funded test accounts")
 	cmd.Flags().StringVar(&in.ChainID, "chain-id", "", "chain ID (default: the profile's)")
+	cmd.Flags().StringVar(&fork, "fork", "", "fork the chain state of a snapshot: a profile snapshot name, a URL, or a .tar.lz4|gz|zst file; the lab runs as the profile's chain_id unless --chain-id is set")
+	cmd.Flags().BoolVar(&keepWork, "keep-snapshot-work", false, "keep the extracted snapshot data after the export instead of deleting it")
 	_ = cmd.MarkFlagRequired("profile")
 	_ = cmd.MarkFlagRequired("version")
 	return cmd
+}
+
+// forkSource turns the --fork argument into a URL or an existing file: a
+// profile snapshot name first, then a URL, then a file.
+func forkSource(p profile.Profile, arg string, vars profile.Vars) (string, error) {
+	if t, ok := p.Snapshots[arg]; ok {
+		return t.Expand(vars), nil
+	}
+	if snapshot.IsURL(arg) {
+		return arg, nil
+	}
+	if _, err := os.Stat(arg); err != nil {
+		known := "profile " + p.Name + " has no snapshots"
+		if len(p.Snapshots) > 0 {
+			known = "profile " + p.Name + " snapshots: " + strings.Join(slices.Sorted(maps.Keys(p.Snapshots)), ", ")
+		}
+		return "", fmt.Errorf("--fork %s is not a snapshot name, a URL, or a file (%s): %w", arg, known, err)
+	}
+	return arg, nil
+}
+
+func expand(ts []profile.Template, vars profile.Vars) []string {
+	var out []string
+	for _, t := range ts {
+		out = append(out, t.Expand(vars))
+	}
+	return out
+}
+
+// exportSnapshot downloads src into <root>/snapshots and exports its state
+// under <root>/snapshots/work/<key>. Progress and step lines go to stderr
+// unless --json is set.
+func exportSnapshot(ctx context.Context, a *app, stderr io.Writer, root, src string, in snapshot.ExportInput) (archive, exported string, err error) {
+	var log io.Writer
+	bar := &progress{w: stderr, last: -1}
+	var onProgress snapshot.Progress
+	if !a.json {
+		log, onProgress = stderr, bar.update
+	}
+	snapshots := filepath.Join(root, "snapshots")
+	archive, err = snapshot.Fetch(ctx, nil, src, snapshots, onProgress)
+	bar.end()
+	if err != nil {
+		return "", "", err
+	}
+	in.Archive, in.WorkDir, in.Log = archive, filepath.Join(snapshots, "work", snapshot.Key(src)), log
+	out, err := snapshot.Export(ctx, in)
+	if err != nil {
+		return "", "", err
+	}
+	if out.Cached && log != nil {
+		_, _ = fmt.Fprintf(log, "reusing export %s\n", out.Path)
+	}
+	return archive, out.Path, nil
 }
 
 // labRow is one lab list row. A lab whose lab.yaml cannot be read has a nil

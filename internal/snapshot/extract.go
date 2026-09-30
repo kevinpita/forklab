@@ -71,11 +71,8 @@ func Extract(ctx context.Context, archive, home string) (Marker, error) {
 		return Marker{}, err
 	}
 	final := filepath.Join(home, dataDir)
-	if m, ok, err := ReadMarker(home); err == nil && ok && m.Archive == archive &&
-		m.Size == info.Size() && m.ModTime.Equal(info.ModTime()) {
-		if _, err := os.Stat(final); err == nil {
-			return m, nil
-		}
+	if m, ok := extracted(archive, info, home); ok {
+		return m, nil
 	}
 
 	// The marker goes first so it is never left describing removed data.
@@ -100,6 +97,19 @@ func Extract(ctx context.Context, archive, home string) (Marker, error) {
 	}
 	m.Archive, m.Size, m.ModTime, m.ExtractedAt = archive, info.Size(), info.ModTime().UTC(), time.Now().UTC()
 	return m, writeMarker(home, m)
+}
+
+// extracted reports whether <home>/data already holds this archive, per the
+// marker Extract wrote.
+func extracted(archive string, info os.FileInfo, home string) (Marker, bool) {
+	m, ok, err := ReadMarker(home)
+	if err != nil || !ok || m.Archive != archive || m.Size != info.Size() || !m.ModTime.Equal(info.ModTime()) {
+		return Marker{}, false
+	}
+	if _, err := os.Stat(filepath.Join(home, dataDir)); err != nil {
+		return Marker{}, false
+	}
+	return m, true
 }
 
 func extractArchive(ctx context.Context, archive, dest string) (Marker, error) {
@@ -280,13 +290,5 @@ func (l *layout) rel(name string) (string, bool, error) {
 }
 
 func writeMarker(home string, m Marker) error {
-	b, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := filepath.Join(home, markerFile+".tmp")
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, filepath.Join(home, markerFile))
+	return writeJSONAtomic(filepath.Join(home, markerFile), m)
 }

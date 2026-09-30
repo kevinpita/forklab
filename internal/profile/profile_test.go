@@ -220,7 +220,7 @@ func TestBuiltins(t *testing.T) {
 		t.Fatal(err)
 	}
 	if x.Origin != profile.OriginBuiltin || x.Profile.GasPrices.String() != "800000000000axrp" ||
-		x.Profile.ExtraPorts["app.toml"]["json-rpc.ws-address"] != 8546 || len(x.Profile.ForkPatches) != 2 || len(x.Profile.FreshPatches) == 0 {
+		x.Profile.ExtraPorts["app.toml"]["json-rpc.ws-address"] != 8546 || len(x.Profile.ForkPatches) != 3 || len(x.Profile.FreshPatches) == 0 {
 		t.Errorf("xrplevm = %+v", x)
 	}
 	url, ok := x.Profile.Binaries["11.2.0"].(profile.URLSource)

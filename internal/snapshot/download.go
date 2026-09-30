@@ -67,6 +67,35 @@ func Fetch(ctx context.Context, client *http.Client, src, dir string, progress P
 	return abs, nil
 }
 
+// Reachable fails when a URL snapshot that is not yet in dir cannot be
+// fetched, so a bad URL is caught before slower steps run. It asks for the
+// first byte: HEAD is not supported by every snapshot host.
+func Reachable(ctx context.Context, client *http.Client, src, dir string) error {
+	if !IsURL(src) {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(dir, Key(src))); err == nil {
+		return nil
+	}
+	if client == nil {
+		client = http.DefaultClient
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, src, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Range", "bytes=0-0")
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("snapshot %s: %w", src, err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		return fmt.Errorf("snapshot %s: %s", src, resp.Status)
+	}
+	return nil
+}
+
 // Download fetches rawURL into dir/Key(rawURL) and returns that path. A
 // complete file is reused as is. An interrupted download stays in a .part
 // file and resumes with an HTTP Range request guarded by If-Range, so it
@@ -79,6 +108,16 @@ func Download(ctx context.Context, client *http.Client, rawURL, dir string, prog
 		return "", err
 	}
 	final := filepath.Join(dir, Key(rawURL))
+	if _, err := os.Stat(final); err == nil {
+		return final, nil
+	}
+	// One downloader per archive; a second process waits and then finds the
+	// finished file.
+	unlock, err := lock(ctx, final+".lock", nil)
+	if err != nil {
+		return "", fmt.Errorf("lock %s: %w", final, err)
+	}
+	defer unlock()
 	if _, err := os.Stat(final); err == nil {
 		return final, nil
 	}
@@ -128,7 +167,7 @@ func Download(ctx context.Context, client *http.Client, rawURL, dir string, prog
 	}
 
 	if total >= 0 {
-		if err := checkFreeSpace(dir, total-offset); err != nil {
+		if err := checkFreeSpace(dir, total-offset, ""); err != nil {
 			return "", err
 		}
 	}
@@ -231,17 +270,22 @@ func parseContentRange(v string) (start, size int64, err error) {
 	return start, size, nil
 }
 
-// ErrNoSpace is returned before a download that cannot fit on disk.
+// ErrNoSpace is returned before a download or export that cannot fit on disk.
 var ErrNoSpace = errors.New("not enough disk space")
 
-func checkFreeSpace(dir string, need int64) error {
+// checkFreeSpace fails with ErrNoSpace when dir has less than need bytes
+// free. A non-empty basis explains how need was estimated.
+func checkFreeSpace(dir string, need int64, basis string) error {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(dir, &st); err != nil {
 		return fmt.Errorf("check free space in %s: %w", dir, err)
 	}
 	avail := uint64(st.Bavail) * uint64(st.Bsize)
 	if need > 0 && uint64(need) > avail {
-		return fmt.Errorf("%w in %s: need %s, available %s", ErrNoSpace, dir, humanBytes(uint64(need)), humanBytes(avail))
+		if basis != "" {
+			basis = " (" + basis + ")"
+		}
+		return fmt.Errorf("%w in %s: need %s%s, available %s", ErrNoSpace, dir, humanBytes(uint64(need)), basis, humanBytes(avail))
 	}
 	return nil
 }

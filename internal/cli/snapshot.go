@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/kevinpita/forklab/internal/paths"
-
 	"github.com/kevinpita/forklab/internal/snapshot"
 	"github.com/spf13/cobra"
 )
@@ -45,13 +44,13 @@ func newSnapshotCmd(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var progress snapshot.Progress
+			var onProgress snapshot.Progress
+			bar := &progress{w: cmd.ErrOrStderr(), last: -1}
 			if !a.json {
-				line := &progressLine{w: cmd.ErrOrStderr(), last: -1}
-				defer line.end()
-				progress = line.update
+				onProgress = bar.update
 			}
-			archive, err := snapshot.Fetch(cmd.Context(), nil, args[0], filepath.Join(root, "snapshots"), progress)
+			archive, err := snapshot.Fetch(cmd.Context(), nil, args[0], filepath.Join(root, "snapshots"), onProgress)
+			bar.end()
 			if err != nil {
 				return err
 			}
@@ -69,31 +68,4 @@ func newSnapshotCmd(a *app) *cobra.Command {
 	fetch.Flags().StringVar(&home, "home", "", "extract the snapshot's data/ into this node home")
 	cmd.AddCommand(fetch)
 	return cmd
-}
-
-// progressLine rewrites one stderr line with each whole percent.
-type progressLine struct {
-	w    io.Writer
-	last int64
-	open bool
-}
-
-func (p *progressLine) update(done, total int64) {
-	if total <= 0 {
-		return
-	}
-	pct := done * 100 / total
-	if pct == p.last {
-		return
-	}
-	p.last = pct
-	_, _ = fmt.Fprintf(p.w, "\rdownload %3d%% (%d/%d bytes)", pct, done, total)
-	p.open = true
-}
-
-// end finishes the line so whatever prints next starts on a fresh one.
-func (p *progressLine) end() {
-	if p.open {
-		_, _ = fmt.Fprintln(p.w)
-	}
 }
