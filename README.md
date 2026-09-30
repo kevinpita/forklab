@@ -204,7 +204,8 @@ binaries:
 
 forklab runs `<bin> version` on every resolved binary and fails if the output
 differs from the requested version. `binary fetch --no-verify` accepts such
-a binary. forklab records the reported version of a `src` build instead of checking it.
+a binary. A binary that prints no version is accepted and listed as
+`unknown`. forklab records the reported version of a `src` build instead of checking it.
 Binaries are cached under `~/.forklab/bin/<chain>/<version>/`.
 
 ## CLI reference
