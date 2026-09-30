@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -69,11 +70,14 @@ func (h *harness) lab(n int, nodeArgs ...string) *lab {
 }
 
 // killLab SIGKILLs the supervisor and every node whose pid file names a
-// process whose cmdline mentions the lab, whatever binary path it runs.
+// process whose cmdline mentions the lab, whatever binary path it runs, and
+// waits until each is gone so nothing writes under the lab once it returns.
 func killLab(l *lab) {
+	var killed []int
 	kill := func(pid int, marker string) {
 		if pid > 0 && pid != os.Getpid() && cmdlineHas(pid, marker) {
 			_ = syscall.Kill(pid, syscall.SIGKILL)
+			killed = append(killed, pid)
 		}
 	}
 	if data, err := os.ReadFile(supervisor.Paths{Dir: l.dir}.Lock()); err == nil {
@@ -87,6 +91,13 @@ func killLab(l *lab) {
 			}
 			_ = json.Unmarshal(data, &pf)
 			kill(pf.PID, s.Home)
+		}
+	}
+	// A dead process has no cmdline, reaped or not.
+	deadline := time.Now().Add(5 * time.Second)
+	for _, pid := range killed {
+		for cmdlineHas(pid, l.dir) && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }
@@ -500,6 +511,12 @@ func (s *lineLog) NodeLine(index int, line string) {
 	s.lines = append(s.lines, fmt.Sprintf("%d: %s", index, line))
 }
 
+func (s *lineLog) snapshot() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.lines)
+}
+
 func (s *lineLog) has(line string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -538,13 +555,49 @@ func TestSubscriberSeesNodeLinesAndSignalExitLeavesNodesRunning(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	before := logOf(l, 0)
-	waitFor(t, "the node to keep ticking after the supervisor left", func() bool { return len(logOf(l, 0)) > len(before) })
+	delivered := len(sub.snapshot())
+	pidFile, err := os.ReadFile(l.specs[0].PidPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Count(logOf(l, 0), "\n")
+	waitFor(t, "the node to keep ticking after the supervisor left", func() bool { return strings.Count(logOf(l, 0), "\n") >= lines+5 })
 	if !alive(pid) {
 		t.Error("supervisor exit on signal killed the node")
 	}
 	if _, err := os.Stat(supervisor.Paths{Dir: l.dir}.Sock()); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("socket left behind: %v", err)
+	}
+	if n := len(sub.snapshot()); n != delivered {
+		t.Errorf("subscriber got %d lines after Run returned", n-delivered)
+	}
+	if got, _ := os.ReadFile(l.specs[0].PidPath); string(got) != string(pidFile) {
+		t.Errorf("pid file changed after Run returned: %s, was %s", got, pidFile)
+	}
+
+	// The next supervisor resumes delivery at the persisted offset.
+	ticks := ticksOf(sub.snapshot(), 0)
+	last := ticks[len(ticks)-1]
+	ctx, cancel = context.WithCancel(context.Background())
+	go func() {
+		done <- supervisor.Run(ctx, supervisor.Options{LabDir: l.dir, Subscriber: sub, Log: io.Discard})
+	}()
+	waitFor(t, "the next supervisor to deliver new ticks", func() bool {
+		ticks = ticksOf(sub.snapshot(), 0)
+		return ticks[len(ticks)-1] >= last+5
+	})
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	next := 0
+	for _, n := range ticks {
+		if n > next {
+			t.Fatalf("subscriber missed ticks %d..%d across the supervisor exit: %v", next, n-1, ticks)
+		}
+		if n == next {
+			next++
+		}
 	}
 }
 

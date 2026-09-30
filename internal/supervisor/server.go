@@ -61,6 +61,10 @@ type supervisor struct {
 	closing  atomic.Bool
 	quit     chan struct{}
 	quitOnce sync.Once
+	// stop closes once Run is leaving; wg counts the node goroutines that
+	// end on it, so Run returns only after they have.
+	stop chan struct{}
+	wg   sync.WaitGroup
 }
 
 // Run is the supervisor process: it takes supervisor.lock and active.lock,
@@ -76,7 +80,7 @@ func Run(ctx context.Context, opts Options) error {
 	if logw == nil {
 		logw = os.Stderr
 	}
-	s := &supervisor{paths: Paths{labDir}, log: log.New(logw, "", log.LstdFlags|log.Lmicroseconds), quit: make(chan struct{}), forward: opts.Subscriber, recordVersion: opts.RecordVersion}
+	s := &supervisor{paths: Paths{labDir}, log: log.New(logw, "", log.LstdFlags|log.Lmicroseconds), quit: make(chan struct{}), stop: make(chan struct{}), forward: opts.Subscriber, recordVersion: opts.RecordVersion}
 
 	lock, err := tryLock(s.paths.Lock())
 	if errors.Is(err, errLocked) {
@@ -113,7 +117,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	s.upgrade, s.completed = st.Plan, st.Completed
 	for _, spec := range specs {
-		n := &node{log: s.log, sub: s, spec: spec}
+		n := &node{log: s.log, sub: s, stop: s.stop, wg: &s.wg, spec: spec}
 		if h, ok := st.Halts[spec.Index]; ok {
 			n.halt, n.swap = &h, SwapHalted
 		}
@@ -149,11 +153,14 @@ func Run(ctx context.Context, opts Options) error {
 		s.log.Printf("supervisor exiting on request")
 	}
 	// Let every in-flight node op finish, so no process is left without its
-	// pid file for the next supervisor to find.
+	// pid file for the next supervisor to find, then end the tails and polls
+	// so nothing touches the lab after Run returns.
 	s.closing.Store(true)
 	for _, n := range s.nodes {
 		n.ops.Lock()
 	}
+	close(s.stop)
+	s.wg.Wait()
 	return nil
 }
 

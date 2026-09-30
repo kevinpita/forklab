@@ -20,7 +20,7 @@ type LineSubscriber interface {
 // file until done is closed and then draining what was written by then. A
 // closed done reads the file once.
 func Tail(path string, offset int64, done <-chan struct{}, fn func(string)) error {
-	return tail(path, offset, done, fn, nil)
+	return tail(path, offset, done, nil, fn, nil)
 }
 
 // TailOffset is the offset where the last n lines of path start,
@@ -72,7 +72,9 @@ func TailOffset(path string, n int) (int64, error) {
 
 // tail is Tail with a progress callback that receives the offset just after
 // the last delivered line, after each batch, so a restart can resume there.
-func tail(path string, offset int64, done <-chan struct{}, fn func(string), progress func(int64)) error {
+// A closed stop ends the tail without draining: the file is still being
+// written, and the next tail resumes at the last reported offset.
+func tail(path string, offset int64, done, stop <-chan struct{}, fn func(string), progress func(int64)) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -126,6 +128,8 @@ func tail(path string, offset int64, done <-chan struct{}, fn func(string), prog
 				partial = nil
 			}
 			report()
+			return nil
+		case <-stop:
 			return nil
 		case <-time.After(100 * time.Millisecond):
 		}

@@ -45,8 +45,9 @@ type NodeStatus struct {
 
 // process is one live node process. cmd is nil for adopted processes, whose
 // exit is observed by polling instead of wait(2). done closes when the exit
-// is observed; tailDone closes once the log tail has drained after it; gone
-// closes once the exit is recorded, when the node no longer reads as running.
+// is observed; tailDone closes once the log tail has drained after it, or
+// stopped with the supervisor; gone closes once the exit is recorded, when
+// the node no longer reads as running.
 type process struct {
 	pid       int
 	binary    string
@@ -66,10 +67,14 @@ type exitInfo struct {
 // node owns one NodeSpec's process. ops serializes lifecycle operations
 // (start, stop, kill, restart, swap); mu guards spec, proc, adopted, last,
 // and the swap fields. spec.Binary is the path the next start uses; a
-// running process may have been started with another one.
+// running process may have been started with another one. The log tail and
+// the adopted-process poll run under wg and end when stop closes, so a
+// supervisor that has left touches nothing.
 type node struct {
-	log *log.Logger
-	sub LineSubscriber
+	log  *log.Logger
+	sub  LineSubscriber
+	stop <-chan struct{}
+	wg   *sync.WaitGroup
 
 	ops     sync.Mutex
 	mu      sync.Mutex
@@ -166,7 +171,7 @@ func (n *node) adopt() error {
 	}
 	p := n.attach(pf, nil, true)
 	n.log.Printf("node %d: adopted pid %d running %s", spec.Index, p.pid, p.binary)
-	go n.pollAdopted(p)
+	n.wg.Go(func() { n.pollAdopted(p) })
 	return nil
 }
 
@@ -183,7 +188,7 @@ func (n *node) attach(pf pidFile, cmd *exec.Cmd, adopted bool) *process {
 		close(p.tailDone)
 		return p
 	}
-	go func() {
+	n.wg.Go(func() {
 		defer close(p.tailDone)
 		deliver := func(line string) { n.sub.NodeLine(spec.Index, line) }
 		persist := func(offset int64) {
@@ -192,10 +197,10 @@ func (n *node) attach(pf pidFile, cmd *exec.Cmd, adopted bool) *process {
 				_ = writePidFile(spec.PidPath, pf)
 			}
 		}
-		if err := tail(spec.LogPath, pf.LogOffset, p.done, deliver, persist); err != nil {
+		if err := tail(spec.LogPath, pf.LogOffset, p.done, n.stop, deliver, persist); err != nil {
 			n.log.Printf("node %d: tail %s: %v", spec.Index, spec.LogPath, err)
 		}
-	}()
+	})
 	return p
 }
 
@@ -217,7 +222,11 @@ func (n *node) waitChild(p *process) {
 // count as exited.
 func (n *node) pollAdopted(p *process) {
 	for n.adoptedAlive(p) {
-		time.Sleep(200 * time.Millisecond)
+		select {
+		case <-n.stop:
+			return
+		case <-time.After(200 * time.Millisecond):
+		}
 	}
 	n.exited(p, exitInfo{at: time.Now()})
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,7 +28,44 @@ func TestMain(m *testing.M) {
 	if os.Getenv(childEnv) != "" && len(os.Args) > 1 {
 		os.Exit(runChild(os.Args[1], os.Args[2:]))
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	if leaked := leakedChildren(); len(leaked) > 0 {
+		fmt.Fprintf(os.Stderr, "processes left running after the tests:\n%s\n", strings.Join(leaked, "\n"))
+		if code == 0 {
+			code = 1
+		}
+	}
+	os.Exit(code)
+}
+
+// leakedChildren lists every other process running this binary (a
+// supervisor or fake node some test spawned and never killed) as
+// "<pid> <argv>", after a short grace for the cleanups' SIGKILLs to land.
+func leakedChildren() []string {
+	self, err := os.Executable()
+	if err != nil {
+		return nil
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var leaked []string
+		entries, _ := os.ReadDir("/proc")
+		for _, e := range entries {
+			pid, err := strconv.Atoi(e.Name())
+			if err != nil || pid == os.Getpid() {
+				continue
+			}
+			if exe, err := os.Readlink("/proc/" + e.Name() + "/exe"); err != nil || exe != self {
+				continue
+			}
+			data, _ := os.ReadFile("/proc/" + e.Name() + "/cmdline")
+			leaked = append(leaked, e.Name()+" "+strings.ReplaceAll(strings.TrimRight(string(data), "\x00"), "\x00", " "))
+		}
+		if len(leaked) == 0 || time.Now().After(deadline) {
+			return leaked
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func runChild(role string, args []string) int {
