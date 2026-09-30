@@ -234,7 +234,7 @@ func TestBuiltins(t *testing.T) {
 		t.Fatal(err)
 	}
 	git, ok := simd.Profile.Binaries["0.53.8"].(profile.GitSource)
-	if !ok || git.Ref.Expand(profile.Vars{Version: "0.53.8"}) != "v0.53.8" || git.Out != "simapp/simd" ||
+	if !ok || git.Ref.Expand(profile.Vars{Version: "0.53.8"}) != "v0.53.8" || git.Out != "simapp/build/simd" ||
 		len(git.Env) != 2 || git.Env["GOTOOLCHAIN"] != "go1.23.6" || git.Env["CGO_ENABLED"] != "0" {
 		t.Errorf("simd binaries[0.53.8] = %#v", simd.Profile.Binaries["0.53.8"])
 	}

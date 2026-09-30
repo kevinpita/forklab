@@ -4,3 +4,4 @@ devenv.local.nix
 /bin/
 .claude/
 docs/
+/dist/

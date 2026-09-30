@@ -1,8 +1,12 @@
 package cli
 
 import (
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -121,5 +125,47 @@ func TestNodeRestartResolvesAVersionAndRecordsIt(t *testing.T) {
 	specs, err := supervisor.LoadNodes(dir)
 	if err != nil || specs[0].Binary != bin {
 		t.Errorf("nodes.json = %+v, %v; want %s", specs, err, bin)
+	}
+}
+
+func TestUpgradeCancelWarnsBeforeSubmitting(t *testing.T) {
+	dir, port := fakeExecLab(t, 0, false)
+	status, err := os.ReadFile("../chain/testdata/simd/status.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One block of history: the block time falls back to the profile's.
+	status = []byte(strings.Replace(string(status), `"earliest_block_height": "83"`, `"earliest_block_height": "99"`, 1))
+	ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(status) }))
+	srv.Listener = ln
+	srv.Start()
+	t.Cleanup(srv.Close)
+
+	testdata, err := filepath.Abs("../chain/testdata/simd/cli")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := `#!/bin/sh
+case "$1 $2 $3" in
+"q upgrade plan") echo '{"plan":{"name":"v2","height":"101"}}' ;;
+"q gov params") cat ` + testdata + `/gov_params.json ;;
+"q auth module-account") cat ` + testdata + `/module_account_gov.json ;;
+*) echo "submit refused" >&2; exit 1 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(dir, "chaind"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := run("upgrade", "cancel", "--lab", dir, "--json")
+	if code != 1 || !strings.Contains(stdout, "submit refused") {
+		t.Fatalf("code %d, stdout %s; want the submission to fail", code, stdout)
+	}
+	if !strings.Contains(stderr, "warning: the cancel vote may end after the plan height") {
+		t.Errorf("stderr %q lacks the warning printed before submitting", stderr)
 	}
 }

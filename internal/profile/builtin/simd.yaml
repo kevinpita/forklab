@@ -16,6 +16,6 @@ binaries:
   "0.53.8":
     git: "https://github.com/cosmos/cosmos-sdk"
     ref: "v{version}"
-    build: "cd simapp && go build -o simd ./simd"
-    out: "simapp/simd"
+    build: "cd simapp && go build -o build/simd ./simd"
+    out: "simapp/build/simd"
     env: { GOTOOLCHAIN: go1.23.6, CGO_ENABLED: "0" }

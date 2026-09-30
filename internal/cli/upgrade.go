@@ -463,9 +463,6 @@ type cancelView struct {
 
 func (v cancelView) WriteHuman(w io.Writer) error {
 	_, _ = fmt.Fprintf(w, "proposal %d passed: upgrade %q at height %d is cancelled\n", v.ProposalID, v.Plan.Name, v.Plan.Height)
-	for _, warn := range v.Warnings {
-		_, _ = fmt.Fprintf(w, "warning: %s\n", warn)
-	}
 	return nil
 }
 
@@ -498,7 +495,9 @@ func newUpgradeCancelCmd(a *app, ref *string) *cobra.Command {
 			}
 			v := cancelView{Plan: *plan}
 			if err := chain.CheckUpgradeHeight(plan.Height, current, blockTime, voting); err != nil {
-				v.Warnings = append(v.Warnings, "the cancel vote may end after the plan height: "+err.Error())
+				warn := "the cancel vote may end after the plan height: " + err.Error()
+				v.Warnings = append(v.Warnings, warn)
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warn)
 			}
 			auth, err := c.ModuleAddress(ctx, "gov")
 			if err != nil {
