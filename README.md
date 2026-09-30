@@ -307,3 +307,7 @@ End-to-end tests run real chains and use the `e2e` build tag:
 `go test -tags e2e ./internal/cli`.
 
 Pushing a `v*` tag runs GoReleaser, which publishes the release archives.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
