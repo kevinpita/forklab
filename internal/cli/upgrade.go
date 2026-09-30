@@ -568,7 +568,7 @@ func newUpgradeStatusCmd(a *app, ref *string) *cobra.Command {
 			}
 			ctx := cmd.Context()
 			v := upgradeStatusView{Lab: e.cfg.Name}
-			sup, err := ensureSupervisor(ctx, e.dir)
+			sup, err := dial(e.dir)
 			if err != nil {
 				return err
 			}

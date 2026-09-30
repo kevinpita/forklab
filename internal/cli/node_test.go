@@ -97,12 +97,17 @@ func nodesOf(t *testing.T, stdout string) []supervisor.NodeStatus {
 func TestNodeCommandsDriveASupervisor(t *testing.T) {
 	dir := newShellLab(t)
 
+	// Reading never starts a supervisor, so a poller cannot bring a stopped
+	// lab back to life.
 	code, stdout, stderr := run("node", "list", "--lab", dir, "--json")
-	if code != 0 {
-		t.Fatalf("node list: code %d, %s", code, stderr)
+	if code != 3 || !strings.Contains(stdout, `"lab_not_running"`) {
+		t.Fatalf("node list of a stopped lab: code %d, %s%s; want 3", code, stdout, stderr)
 	}
-	if nodes := nodesOf(t, stdout); len(nodes) != 1 || nodes[0].State != supervisor.StateStopped {
-		t.Fatalf("fresh lab = %+v", nodes)
+	if _, err := supervisor.Dial(dir); err == nil {
+		t.Fatal("node list spawned a supervisor")
+	}
+	if running(dir) {
+		t.Fatal("a lab with no supervisor and no node reports running")
 	}
 
 	code, stdout, stderr = run("node", "start", "0", "--lab", dir, "--json")
@@ -136,9 +141,17 @@ func TestNodeCommandsDriveASupervisor(t *testing.T) {
 		t.Errorf("node logs: code %d, %q", code, stdout)
 	}
 
+	code, stdout, _ = run("node", "logs", "0", "--tail", "1", "--lab", dir)
+	if code != 0 || strings.Count(stdout, "\n") != 1 {
+		t.Errorf("node logs --tail 1: code %d, %q; want one line", code, stdout)
+	}
+
 	code, stdout, _ = run("node", "list", "--lab", dir)
 	if code != 0 || !strings.Contains(stdout, "running") || !strings.Contains(stdout, strconv.Itoa(pid)) {
 		t.Errorf("human node list: code %d\n%s", code, stdout)
+	}
+	if !running(dir) {
+		t.Error("a lab with a live node reports stopped")
 	}
 
 	code, stdout, stderr = run("node", "stop", "all", "--lab", dir, "--json", "--timeout", "3s")
@@ -147,6 +160,9 @@ func TestNodeCommandsDriveASupervisor(t *testing.T) {
 	}
 	if n := nodesOf(t, stdout)[0]; n.State != supervisor.StateExited || n.ExitCode == nil || *n.ExitCode != 0 {
 		t.Errorf("after stop = %+v", n)
+	}
+	if running(dir) {
+		t.Error("a lab whose supervisor answers but whose nodes all stopped reports running")
 	}
 
 	code, _, stderr = run("supervisor", "down", "--lab", dir, "--json")

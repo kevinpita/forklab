@@ -76,7 +76,7 @@ func newNodeListCmd(a *app, labDir *string) *cobra.Command {
 		Short: "Show every node's state, pid, uptime, and binary",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			c, err := ensureSupervisor(cmd.Context(), *labDir)
+			c, err := dial(*labDir)
 			if err != nil {
 				return err
 			}
@@ -191,7 +191,10 @@ type logLine struct {
 }
 
 func newNodeLogsCmd(a *app, labDir *string) *cobra.Command {
-	var follow bool
+	var (
+		follow bool
+		last   int
+	)
 	cmd := &cobra.Command{
 		Use:   "logs <i>",
 		Short: "Print a node's log; --json emits one object per line",
@@ -209,9 +212,13 @@ func newNodeLogsCmd(a *app, labDir *string) *cobra.Command {
 			if follow {
 				done = cmd.Context().Done()
 			}
+			from, err := supervisor.TailOffset(specs[i].LogPath, last)
+			if err != nil {
+				return err
+			}
 			w := cmd.OutOrStdout()
 			enc := json.NewEncoder(w)
-			return supervisor.Tail(specs[i].LogPath, 0, done, func(line string) {
+			return supervisor.Tail(specs[i].LogPath, from, done, func(line string) {
 				if a.json {
 					_ = enc.Encode(logLine{Node: i, Line: line})
 				} else {
@@ -221,5 +228,6 @@ func newNodeLogsCmd(a *app, labDir *string) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "keep printing new lines until interrupted")
+	cmd.Flags().IntVar(&last, "tail", 0, "start with only the last N lines (0: the whole log)")
 	return cmd
 }

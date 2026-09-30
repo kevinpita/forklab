@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kevinpita/forklab/internal/chain"
+	"github.com/kevinpita/forklab/internal/cli/output"
 	"github.com/spf13/cobra"
 )
 
@@ -245,9 +246,7 @@ func watch[V interface{ WriteHuman(io.Writer) error }](cmd *cobra.Command, a *ap
 			last = key
 			switch {
 			case err != nil && a.json:
-				_ = enc.Encode(struct {
-					Error string `json:"error"`
-				}{err.Error()})
+				_ = output.WriteStreamError(w, err)
 			case err != nil:
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
 			case a.json:

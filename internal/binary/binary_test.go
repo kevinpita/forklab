@@ -171,6 +171,29 @@ func TestResolveIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestListSkipsMetaThatVanishes(t *testing.T) {
+	srv, _ := serve(t, tarGz(t, entry{"bin/chaind", script("v1.2.3\n")}))
+	c := Cache{Dir: t.TempDir()}
+	p := chainProfile("1.2.3", profile.URLSource{URL: profile.Template(srv.URL + "/c.tar.gz")})
+	kept, err := c.Resolve(context.Background(), p, "1.2.3", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A dangling meta.json is what List sees when a delete lands between its
+	// glob and its read.
+	gone := filepath.Join(c.Dir, "chain", "9.9.9")
+	if err := os.MkdirAll(gone, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(gone, "missing"), filepath.Join(gone, "meta.json")); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := c.List()
+	if err != nil || len(listed) != 1 || listed[0] != kept {
+		t.Errorf("list = %+v, %v; want only %+v", listed, err, kept)
+	}
+}
+
 func TestResolveNeverWritesArchivePaths(t *testing.T) {
 	bin := script("1.2.3\n")
 	tests := []struct {

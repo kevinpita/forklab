@@ -1,0 +1,5 @@
+{"node":0,"line":"11:52AM INF Upgrading IAVL storage for faster queries + execution on live state. This may take a while commit=436F6D6D697449447B5B5D3A307D module=server store_key=\"KVStoreKey{0xc001851cc0, staking}\" version=1"}
+{"node":0,"line":"11:52AM INF Upgrading IAVL storage for faster queries + execution on live state. This may take a while commit=436F6D6D697449447B5B5D3A307D module=server store_key=\"KVStoreKey{0xc001af04a0, slashing}\" version=1"}
+{"node":0,"line":"11:52AM INF Upgrading IAVL storage for faster queries + execution on live state. This may take a while commit=436F6D6D697449447B5B5D3A307D module=server store_key=\"KVStoreKey{0xc001af1270, mint}\" version=1"}
+{"node":0,"line":"11:52AM INF Upgrading IAVL storage for faster queries + execution on live state. This may take a while commit=436F6D6D697449447B5B5D3A307D module=server store_key=\"KVStoreKey{0xc001604460, gov}\" version=1"}
+{"node":0,"line":"11:52AM INF Upgrading IAVL storage for faster queries + execution on live state. This may take a while commit=436F6D6D697449447B5B5D3A307D module=server store_key=\"KVStoreKey{0xc001605280, upgrade}\" version=1"}

@@ -1,0 +1,1 @@
+{"ok":true,"data":{"args":["q","bank","total","--home","/tmp/claude-1000/p10/labs/demo/node0","--node","tcp://127.0.0.1:26657"],"exit_code":0,"stdout":"pagination:\n  total: \"1\"\nsupply:\n- amount: \"80000041194606023585565\"\n  denom: stake\n","stderr":""}}

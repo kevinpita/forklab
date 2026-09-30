@@ -39,9 +39,17 @@ func newLabCmd(a *app) *cobra.Command {
 	return cmd
 }
 
+// running reports whether any of the lab's node processes is live, by the
+// supervisor when one answers, else by the pid files. A supervisor alone does
+// not make a lab running.
 func running(dir string) bool {
-	_, err := supervisor.Dial(dir)
-	return err == nil
+	if c, err := supervisor.Dial(dir); err == nil {
+		if nodes, err := c.Status(); err == nil {
+			return slices.ContainsFunc(nodes, func(n supervisor.NodeStatus) bool { return n.State == supervisor.StateRunning })
+		}
+	}
+	live, err := supervisor.LiveNodes(dir)
+	return err == nil && len(live) > 0
 }
 
 type labView struct {

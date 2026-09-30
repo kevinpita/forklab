@@ -23,6 +23,53 @@ func Tail(path string, offset int64, done <-chan struct{}, fn func(string)) erro
 	return tail(path, offset, done, fn, nil)
 }
 
+// TailOffset is the offset where the last n lines of path start,
+// for a Tail that shows only the end of a long log. An unterminated last
+// line counts. n <= 0 means the start.
+func TailOffset(path string, n int) (int64, error) {
+	if n <= 0 {
+		return 0, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	end := fi.Size()
+	buf := make([]byte, 64<<10)
+	seen := 0
+	// Tail delivers an unterminated last line too, so it counts as one.
+	if end > 0 {
+		if _, err := f.ReadAt(buf[:1], end-1); err != nil {
+			return 0, err
+		}
+		if buf[0] != '\n' {
+			seen = 1
+		}
+	}
+	for pos := end; pos > 0; {
+		size := min(int64(len(buf)), pos)
+		pos -= size
+		if _, err := f.ReadAt(buf[:size], pos); err != nil {
+			return 0, err
+		}
+		for i := size - 1; i >= 0; i-- {
+			if buf[i] != '\n' {
+				continue
+			}
+			if seen == n {
+				return pos + i + 1, nil
+			}
+			seen++
+		}
+	}
+	return 0, nil
+}
+
 // tail is Tail with a progress callback that receives the offset just after
 // the last delivered line, after each batch, so a restart can resume there.
 func tail(path string, offset int64, done <-chan struct{}, fn func(string), progress func(int64)) error {

@@ -98,8 +98,9 @@ func TestNodeLabResolvesNamesPathsAndDefaults(t *testing.T) {
 		t.Errorf("--lab gamma: code %d, %q; want lab not found", code, stderr)
 	}
 
-	if code, _, stderr := run("node", "list", "--lab", "beta"); code != 0 {
-		t.Fatalf("node list --lab beta: code %d, %s", code, stderr)
+	// A process-changing command starts the supervisor that makes beta active.
+	if code, _, stderr := run("node", "stop", "all", "--lab", "beta"); code != 0 {
+		t.Fatalf("node stop all --lab beta: code %d, %s", code, stderr)
 	}
 	if code, stdout, _ := run("node", "logs", "0"); code != 0 || stdout != "hello beta\n" {
 		t.Errorf("beta running: code %d, %q; want the running lab picked", code, stdout)
@@ -219,7 +220,7 @@ func TestLabResetRequiresDownAndKeepsGenesis(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout, `"method":"manual"`) || !strings.Contains(stdout, `"version":"2.0.0"`) {
 		t.Fatalf("reset --force: code %d\n%s%s", code, stdout, stderr)
 	}
-	if running(dir) {
+	if _, err := supervisor.Dial(dir); err == nil {
 		t.Error("supervisor still answers after reset --force")
 	}
 	if specs, err := supervisor.LoadNodes(dir); err != nil || specs[0].Binary != bin {

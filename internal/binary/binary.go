@@ -261,6 +261,10 @@ func (c Cache) List() ([]Binary, error) {
 			continue
 		}
 		b, err := readMeta(filepath.Dir(m))
+		// A concurrent delete can remove the entry between the glob and the read.
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", m, err)
 		}

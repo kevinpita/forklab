@@ -134,6 +134,14 @@ func PrintError(stdout, stderr io.Writer, asJSON bool, err error) Code {
 	return code
 }
 
+// WriteStreamError writes err as one NDJSON line of a streaming command,
+// {"error":{"code","message"}}, typed the same way as an envelope's error.
+func WriteStreamError(w io.Writer, err error) error {
+	return json.NewEncoder(w).Encode(struct {
+		Error errorBody `json:"error"`
+	}{errorBody{Code: ExitCode(err), Message: err.Error()}})
+}
+
 func writeJSON(w io.Writer, v envelope) error {
 	return json.NewEncoder(w).Encode(v)
 }

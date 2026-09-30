@@ -1,0 +1,1 @@
+{"ok":false,"data":{"args":["bogus","--home","/tmp/claude-1000/p10/labs/demo/node0"],"exit_code":1,"stdout":"","stderr":"unknown command \"bogus\" for \"simd\"\n"}}

@@ -10,6 +10,17 @@ import (
 	"github.com/kevinpita/forklab/internal/cli/output"
 )
 
+func TestWriteStreamErrorIsTyped(t *testing.T) {
+	var buf bytes.Buffer
+	if err := output.WriteStreamError(&buf, fmt.Errorf("rpc: %w", output.ErrLabNotRunning)); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"error":{"code":"lab_not_running","message":"rpc: lab not running"}}` + "\n"
+	if buf.String() != want {
+		t.Errorf("stream error = %q, want %q", buf.String(), want)
+	}
+}
+
 func TestExitCode(t *testing.T) {
 	tests := []struct {
 		name string
