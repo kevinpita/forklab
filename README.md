@@ -1,4 +1,23 @@
+<div align="center">
+
 # forklab
+
+**Rehearse Cosmos SDK chain upgrades on your own machine.**
+
+Run N local validators from a fresh genesis or from forked mainnet state, then
+stop nodes, pass proposals, and swap binaries at the upgrade height from one
+CLI or a live terminal UI.
+
+[Install](#install) · [Quick start](#quick-start) · [Fork mode](#fork-mode) · [Profiles](#profiles) · [CLI reference](#cli-reference) · [Releases](https://github.com/kevinpita/forklab/releases)
+
+[![CI](https://github.com/kevinpita/forklab/actions/workflows/ci.yml/badge.svg)](https://github.com/kevinpita/forklab/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/kevinpita/forklab)](https://github.com/kevinpita/forklab/releases)
+[![Go](https://img.shields.io/badge/go-1.27+-00ADD8?logo=go&logoColor=white)](go.mod)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+</div>
+
+![forklab TUI on a live two-validator lab: a node stops and starts while the consensus view tracks the missing votes](.github/assets/hero.gif)
 
 forklab runs a local network of N validators for any Cosmos SDK chain. A lab
 starts from a fresh genesis or from mainnet state forked out of a snapshot.
@@ -13,6 +32,104 @@ specific code. Two profiles ship built in: `simd` (the Cosmos SDK example
 chain) and `xrplevm` (XRPL EVM, binary `exrpd`).
 
 forklab runs one lab at a time. Many labs and profiles can exist on disk.
+
+## Why forklab
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**Fresh or forked labs.** Start from the chain's own genesis, or take over
+mainnet state from a snapshot with your validators holding about 90% of the
+voting power.
+
+</td>
+<td width="50%" valign="top">
+
+**N validators.** Each node gets its own home, ports, and log. Stop one, kill
+one with SIGKILL, or restart one on another binary.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**Upgrade rehearsal with auto swap.** `upgrade schedule` submits and votes the
+proposal, then restarts every halted node on the new binary at the plan
+height.
+
+</td>
+<td valign="top">
+
+**Consensus you can see.** Height, round, step, proposer, and each
+validator's prevote and precommit, live or as JSON.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**Agent-first CLI.** Every command takes `--json`, never prompts, and exits
+with a typed code, so scripts and agents drive it the same way you do.
+
+</td>
+<td valign="top">
+
+**A TUI on top of the CLI.** Every screen, form, and action is a
+`forklab ... --json` command. Press `c` to see the commands behind the current
+panel.
+
+</td>
+</tr>
+</table>
+
+## Screenshots
+
+**First run.** `forklab` with no lab on disk opens a seven-step wizard that
+builds the `lab create` command as you answer, then offers to bring the lab up.
+
+![The first-run wizard on its profile step](.github/assets/wizard.png)
+
+**Nodes and live logs.** The left column holds every panel. The main pane
+follows the selected node's log.
+
+![Nodes panel with the live log of node0](.github/assets/tui-main.png)
+
+**Consensus.** The round in progress, vote bars against the 2/3 mark, each
+validator's votes, and the peer map.
+
+![Consensus view with prevotes, precommits, and the last commit](.github/assets/tui-consensus.png)
+
+**Proposals.** Proposals with their status, voting time left, and tally.
+
+![A passed text proposal with its tally](.github/assets/tui-proposals.png)
+
+**Forms.** Every form shows the exact command it will run and updates it as
+you type. This is `u` on the Upgrades panel.
+
+![The upgrade schedule form with its command line](.github/assets/upgrade-form.png)
+
+**Command palette.** `Ctrl+K` searches every action and shows the command it
+runs.
+
+![Command palette filtered to node actions](.github/assets/tui-palette.png)
+
+**Command preview.** `c` lists the forklab commands behind the panel.
+
+![Command preview for the Nodes panel](.github/assets/tui-preview.png)
+
+**Upgrade halt.** After the form schedules it, both `exrpd` 11.1.1 nodes halt
+at the plan height.
+
+![Upgrades panel with both nodes halted at v11.2.0](.github/assets/upgrade-halt.png)
+
+**Automatic swap.** The supervisor restarts them on 11.2.0 and blocks resume.
+
+![Upgrades panel with both nodes swapped to 11.2.0](.github/assets/upgrade-swap.png)
+
+**The plain CLI.** `lab create`, `lab up`, and `status` on a fresh `simd` lab.
+
+![forklab lab create, lab up, and status in a terminal](.github/assets/cli.png)
 
 ## Install
 
@@ -56,6 +173,9 @@ forklab gov submit --template text --title "hello" --auto-vote
 forklab gov list
 forklab lab down demo
 ```
+
+The text proposal passes when the `simd` profile's 30s voting period ends, so
+run `forklab gov list` again after that to see it as `PASSED`.
 
 Commands that act on a running lab take `--lab <name>`. Without it they use
 the running lab, or the only lab on disk.
@@ -275,6 +395,20 @@ build) show the exact command as you type. With no lab yet, a guided wizard
 creates the first one. Press `Ctrl+K` for the command palette and `?` for the
 keys of the focused panel.
 
+| Panel | Keys |
+|-------|------|
+| Any | `1`-`8` jump to a panel, `Ctrl+K` palette, `:` run a command, `c` command preview, `x` exec, `T` next theme, `?` help, `q` quit |
+| Nodes | `s` stop, `S` start, `K` kill, `r` restart, `R` restart on a version, `l` follow logs, `w` wrap |
+| Proposals | `n` new proposal, `v` vote |
+| Upgrades | `u` schedule, `X` cancel |
+| Accounts | `s` send |
+| Labs | `n` new, `u` up, `d` down, `R` reset, `D` delete, `m` keys and mnemonics |
+| Profiles | `n` new, `e` edit, `v` validate, `D` delete |
+| Binaries | `f` fetch, `b` build |
+
+`--theme` (or `FORKLAB_THEME`) picks `ansi`, `tokyonight`, `catppuccin`, or
+`gruvbox`, and `T` cycles them. The screenshots use `tokyonight`.
+
 ## Files
 
 | Path | Contents |
@@ -311,6 +445,11 @@ End-to-end tests run real chains and use the `e2e` build tag:
 `go test -tags e2e ./internal/cli`.
 
 Pushing a `v*` tag runs GoReleaser, which publishes the release archives.
+
+The README screenshots and GIF come from real labs driven by
+[VHS](https://github.com/charmbracelet/vhs) tapes. The header of
+[`.github/assets/tapes/render.sh`](.github/assets/tapes/render.sh) shows how
+to render them again.
 
 ## License
 
