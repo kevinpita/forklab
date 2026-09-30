@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/itchyny/gojq"
@@ -98,6 +99,18 @@ func (d Document) Validate() error {
 		}
 		if s.WaitHeight != nil && *s.WaitHeight < 1 || s.Pause != nil && *s.Pause < 1 {
 			return fmt.Errorf("step %d: height must be positive", i+1)
+		}
+		if s.Store != nil {
+			request := *s.Store
+			if strings.Contains(request.Name, "{{") {
+				request.Name = "store"
+			}
+			if strings.Contains(request.KeyHex, "{{") {
+				request.KeyHex = "00"
+			}
+			if err := request.Validate(); err != nil {
+				return fmt.Errorf("step %d store: %w", i+1, err)
+			}
 		}
 		if s.Assert != "" {
 			q, err := gojq.Parse(s.Assert)

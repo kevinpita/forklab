@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kevinpita/forklab/internal/chain"
 	"github.com/kevinpita/forklab/internal/runbook"
 )
 
@@ -94,5 +95,34 @@ func TestRunbookWritePreservesIntegerVariableTypeAndValue(t *testing.T) {
 	code, out, stderr := run("runbook", "show", file, "--json")
 	if code != 0 || !strings.Contains(out, `"large":9007199254740993`) || !strings.Contains(out, `"n":1000000`) {
 		t.Fatalf("code=%d out=%s stderr=%s", code, out, stderr)
+	}
+}
+
+func TestInvalidStoreRunbookRejectedBeforeEarlierScript(t *testing.T) {
+	dir, _ := fakeExecLab(t, 0, false)
+	file := filepath.Join(t.TempDir(), "bad-store.yaml")
+	marker := filepath.Join(t.TempDir(), "should-not-exist")
+	document := runbook.Document{Version: 1, Steps: []runbook.Step{{Script: []string{"touch", marker}}, {Store: &chain.StoreRequest{Name: "bank", KeyHex: "not-hex"}}}}
+	payload, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, _, _ := run("runbook", "write", file, "--document", string(payload)); code != 2 {
+		t.Fatalf("invalid store write accepted, exit=%d", code)
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatalf("invalid store write created file: %v", err)
+	}
+	if err := os.WriteFile(file, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"validate", "run"} {
+		args := []string{"runbook", action, file, "--lab", dir}
+		if code, _, stderr := run(args...); code != 2 || !strings.Contains(stderr, "hexadecimal") {
+			t.Fatalf("%s exit=%d stderr=%s", action, code, stderr)
+		}
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("script executed before store validation: %v", err)
 	}
 }

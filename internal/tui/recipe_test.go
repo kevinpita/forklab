@@ -172,7 +172,12 @@ func TestBuilderSaveBeforeRunAndBusyCommands(t *testing.T) {
 	if m.recipe.Busy || m.recipe.Dirty || !m.recipe.Existing {
 		t.Fatal("background save did not update the retained draft")
 	}
-	if press(m, "r") == nil || m.overlay != overlayNone || !reflect.DeepEqual(m.running[len(m.running)-1].cmd, Command{"runbook", "run", "draft.yaml"}) {
+	press(m, "r")
+	if m.overlay != overlayForm || m.form.values()["file"] != "draft.yaml" {
+		t.Fatal("saved runbook did not open target selection")
+	}
+	_ = m.formSubmit()
+	if !reflect.DeepEqual(m.running[len(m.running)-1].cmd, Command{"runbook", "run", "draft.yaml", "--lab", m.labs[0].Name}) {
 		t.Fatal("saved runbook did not run through the CLI")
 	}
 }
@@ -224,5 +229,50 @@ func TestEditingRecipePreservesLargeIntegers(t *testing.T) {
 	command := m.recipe.saveCommand()
 	if !strings.Contains(command[4], `"large":9007199254740993`) || !strings.Contains(command[4], `"pause":1000000`) {
 		t.Fatalf("integers changed: %s", command[4])
+	}
+}
+
+func TestRunbookEntryPointsRequireExplicitLab(t *testing.T) {
+	for _, builder := range []bool{false, true} {
+		m := loadedModel(t, buildTheme("ansi", true))
+		m.labs = []labInfo{{Name: "active", Running: true}, {Name: "selected", Running: false}}
+		m.cursor[panelLabs] = 1
+		path := "case.yaml"
+		if builder {
+			m.recipe = &recipeEditor{Path: path, Existing: true, Steps: []map[string]any{{"assert": "true"}}}
+			m.overlay = overlayRecipe
+			press(m, "r")
+		} else {
+			press(m, "ctrl+t")
+		}
+		if m.form == nil {
+			t.Fatalf("builder=%v: run skipped target selection", builder)
+		}
+		fill(m.form, map[string]string{"file": path})
+		m.cursor[panelLabs] = 0
+		_ = m.formSubmit()
+		want := Command{"runbook", "run", path, "--lab", "selected"}
+		if len(m.running) != 1 || !reflect.DeepEqual(m.running[0].cmd, want) {
+			t.Fatalf("builder=%v command=%v want=%v", builder, m.running, want)
+		}
+	}
+}
+
+func TestOpeningAnotherRecipeRequiresExplicitDraftDiscard(t *testing.T) {
+	m := loadedModel(t, buildTheme("ansi", true))
+	draft := &recipeEditor{Path: "unsaved.yaml", Dirty: true, Vars: map[string]any{"amount": "10"}, Steps: []map[string]any{{"assert": "true"}}}
+	m.recipe = draft
+	m.overlay = overlayRecipe
+	press(m, "o")
+	fill(m.form, map[string]string{"path": "another.yaml"})
+	_ = m.formSubmit()
+	if m.recipe != draft || len(m.recipe.Steps) != 1 || !m.recipe.Dirty || m.overlay != overlayRecipe {
+		t.Fatal("opening another recipe silently discarded unsaved draft")
+	}
+	press(m, "o")
+	fill(m.form, map[string]string{"path": "another.yaml", "draft": "discard"})
+	_ = m.formSubmit()
+	if m.recipe == draft || m.recipe.Path != "another.yaml" {
+		t.Fatal("explicit discard did not allow replacement")
 	}
 }

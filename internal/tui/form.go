@@ -50,8 +50,7 @@ type fieldSpec struct {
 type values map[string]string
 
 type formSpec struct {
-	title string
-	// submit handles local draft editing; only saving calls the CLI.
+	title    string
 	submit   func(values) tea.Cmd
 	returnTo overlayKind
 	fields   []fieldSpec

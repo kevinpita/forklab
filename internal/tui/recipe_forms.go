@@ -10,16 +10,29 @@ import (
 )
 
 func recipeEditorSpec(m *Model) *formSpec {
-	return &formSpec{title: "Create or edit a runbook", returnTo: m.overlay, fields: []fieldSpec{
-		{key: "path", label: "YAML file", kind: fieldText, placeholder: "./my-test.yaml"},
+	path := ""
+	if m.recipe != nil && m.recipe.Dirty {
+		path = m.recipe.Path
+	}
+	fields := []fieldSpec{
+		{key: "path", label: "YAML file", kind: fieldText, def: path, placeholder: "./my-test.yaml"},
 		{key: "mode", label: "Mode", kind: fieldSelect, def: "new", options: []option{{"new", "Create new"}, {"edit", "Edit existing"}}},
 		{key: "name", label: "Name", kind: fieldText, optional: true, show: has("mode", "new")},
-	}, build: func(v values) Command {
+	}
+	if m.recipe != nil && m.recipe.Dirty {
+		fields = append(fields, fieldSpec{key: "draft", label: "Unsaved draft", kind: fieldSelect, def: "keep", options: []option{{"keep", "Keep current draft"}, {"discard", "Discard and open file"}}})
+	}
+	return &formSpec{title: "Create or edit a runbook", returnTo: m.overlay, fields: fields, build: func(v values) Command {
 		if v["mode"] == "edit" {
 			return Command{"runbook", "show", v["path"]}
 		}
 		return Command{"runbook", "write", v["path"], "--document", "DOCUMENT"}
 	}, submit: func(v values) tea.Cmd {
+		if m.recipe != nil && m.recipe.Dirty && v["draft"] != "discard" {
+			m.form = nil
+			m.overlay = overlayRecipe
+			return nil
+		}
 		m.recipe = &recipeEditor{Path: v["path"], Name: v["name"], Steps: []map[string]any{}, Existing: v["mode"] == "edit"}
 		m.form = nil
 		m.overlay = overlayRecipe

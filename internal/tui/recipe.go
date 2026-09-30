@@ -10,7 +10,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// Drafts are local UI state. Every file read/write still goes through the CLI.
 type recipeEditor struct {
 	Path     string
 	Name     string
@@ -118,8 +117,10 @@ func (m *Model) runRecipe() tea.Cmd {
 		r.Error = "Save your changes before running this runbook."
 		return nil
 	}
-	m.overlay = overlayNone
-	return m.exec(Command{"runbook", "run", r.Path}, true)
+	spec := recipeSpec("run")(m)
+	spec.fields[0].def = r.Path
+	spec.returnTo = overlayRecipe
+	return m.openForm(spec)
 }
 
 func stepDescription(s map[string]any) string {

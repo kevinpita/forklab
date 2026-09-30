@@ -79,7 +79,7 @@ The builder lists the recipe's steps and opens a form for each action.
 | `J` / `K` | Move the selected step down or up |
 | `v` | Add or update a variable |
 | `s` | Validate and save the YAML |
-| `r` | Run the saved recipe |
+| `r` | Choose a lab and run the saved recipe |
 | `Esc` | Close the builder |
 
 Choose a transaction, query, assertion, height wait, pause, manual hold,
@@ -87,8 +87,11 @@ resume, raw store lookup, or local script. The form shows the fields for
 that action. Command arguments support quotes and Go templates, such as
 `bank balances '{{ .accounts.test0.address }}'`. The builder saves arguments
 as YAML lists without implicit shell parsing. Save changes before running.
+Creating or loading another file keeps an unsaved draft unless you explicitly
+choose **Discard and open file**.
 
 `Ctrl+T`, `Ctrl+V`, and `Ctrl+O` open file forms for run, validate, and show.
+Both run actions show a lab selector and pass the chosen lab explicitly.
 `Ctrl+P` selects a committed height to pause the selected lab, `Ctrl+S`
 resumes it, and `Ctrl+B` opens a raw store form. A pause keeps query RPC
 available and remains until resume, including after a recipe error.
