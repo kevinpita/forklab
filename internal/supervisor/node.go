@@ -36,6 +36,11 @@ type NodeStatus struct {
 	// Signal names the signal that ended the process, when one did.
 	Signal   string     `json:"signal,omitempty"`
 	ExitedAt *time.Time `json:"exited_at,omitempty"`
+	// Upgrade is the node's phase in the pending upgrade and Halt the plan
+	// it halted on; SwapError says why a swap failed.
+	Upgrade   SwapPhase `json:"upgrade,omitempty"`
+	Halt      *Halt     `json:"halt,omitempty"`
+	SwapError string    `json:"swap_error,omitempty"`
 }
 
 // process is one live node process. cmd is nil for adopted processes, whose
@@ -59,9 +64,9 @@ type exitInfo struct {
 }
 
 // node owns one NodeSpec's process. ops serializes lifecycle operations
-// (start, stop, kill, restart); mu guards spec, proc, adopted, and last.
-// spec.Binary is the path the next start uses; a running process may have
-// been started with another one.
+// (start, stop, kill, restart, swap); mu guards spec, proc, adopted, last,
+// and the swap fields. spec.Binary is the path the next start uses; a
+// running process may have been started with another one.
 type node struct {
 	log *log.Logger
 	sub LineSubscriber
@@ -72,12 +77,19 @@ type node struct {
 	proc    *process
 	adopted bool
 	last    *exitInfo
+	swap    SwapPhase
+	halt    *Halt
+	swapErr string
 }
 
 func (n *node) status() NodeStatus {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	st := NodeStatus{Index: n.spec.Index, Name: n.spec.Name, State: StateStopped, Binary: n.spec.Binary}
+	st := NodeStatus{Index: n.spec.Index, Name: n.spec.Name, State: StateStopped, Binary: n.spec.Binary, Upgrade: n.swap, SwapError: n.swapErr}
+	if n.halt != nil {
+		halt := *n.halt
+		st.Halt = &halt
+	}
 	if p := n.proc; p != nil {
 		started := p.startedAt
 		st.State = StateRunning
@@ -262,12 +274,8 @@ func (n *node) signal(sig syscall.Signal, timeout time.Duration) error {
 
 // setBinary switches the path the next start uses. The caller holds ops.
 func (n *node) setBinary(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
+	if err := isExecutable(path); err != nil {
 		return err
-	}
-	if info.IsDir() || info.Mode()&0o111 == 0 {
-		return fmt.Errorf("%s is not an executable file", path)
 	}
 	n.mu.Lock()
 	n.spec.Binary = path

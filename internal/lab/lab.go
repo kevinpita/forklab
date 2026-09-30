@@ -37,6 +37,8 @@ const (
 
 // Config is lab.yaml. Profile is a copy of the profile the lab was created
 // with, so later edits to the profile do not change an existing lab.
+// Version is the version the lab was created with and replays from; each
+// Node's Version is what it runs now.
 type Config struct {
 	Name       string           `yaml:"name" json:"name"`
 	Mode       Mode             `yaml:"mode" json:"mode"`
@@ -172,13 +174,18 @@ func Load(dir string) (Config, error) {
 	return c, nil
 }
 
-// Save writes <dir>/lab.yaml.
+// Save writes <dir>/lab.yaml atomically, so a command reading the lab
+// never sees a half-written file while the supervisor records a version.
 func Save(dir string, c Config) error {
 	data, err := yaml.Marshal(c)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, configFile), data, 0o644)
+	path := filepath.Join(dir, configFile)
+	if err := os.WriteFile(path+".tmp", data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(path+".tmp", path)
 }
 
 // Listing is one row of List. Error is set when lab.yaml cannot be read.

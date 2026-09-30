@@ -18,7 +18,7 @@ import (
 // TestMain lets the node commands spawn this test binary as the supervisor:
 // EnsureRunning re-executes os.Executable() with "supervisor run".
 func TestMain(m *testing.M) {
-	if os.Getenv("FORKLAB_TEST_CHILD") != "" && len(os.Args) > 1 && os.Args[1] == "supervisor" {
+	if os.Getenv("FORKLAB_TEST_CHILD") != "" && len(os.Args) > 1 && (os.Args[1] == "supervisor" || os.Args[1] == "upgrade") {
 		os.Exit(Run(os.Args[1:], os.Stdout, os.Stderr))
 	}
 	os.Exit(m.Run())

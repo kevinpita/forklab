@@ -33,9 +33,14 @@ func Dial(labDir string) (*Client, error) {
 }
 
 func (c *Client) call(req Request) ([]NodeStatus, error) {
+	resp, err := c.send(req)
+	return resp.Nodes, err
+}
+
+func (c *Client) send(req Request) (Response, error) {
 	conn, err := net.DialTimeout("unix", c.paths.Sock(), time.Second)
 	if err != nil {
-		return nil, err
+		return Response{}, err
 	}
 	defer func() { _ = conn.Close() }()
 	wait := req.Timeout
@@ -44,19 +49,32 @@ func (c *Client) call(req Request) ([]NodeStatus, error) {
 	}
 	_ = conn.SetDeadline(time.Now().Add(wait + killTimeout + 5*time.Second))
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		return nil, err
+		return Response{}, err
 	}
 	var resp Response
 	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
-		return nil, err
+		return Response{}, err
 	}
 	if resp.Error != "" {
-		return resp.Nodes, errors.New(resp.Error)
+		return resp, errors.New(resp.Error)
 	}
-	return resp.Nodes, nil
+	return resp, nil
 }
 
 func (c *Client) Status() ([]NodeStatus, error) { return c.call(Request{Op: OpStatus}) }
+
+// Upgrade returns the pending upgrade, nil when none, with every node's
+// status.
+func (c *Client) Upgrade() (*Upgrade, []NodeStatus, error) {
+	resp, err := c.send(Request{Op: OpStatus})
+	return resp.Upgrade, resp.Nodes, err
+}
+
+// SetUpgrade makes u the pending upgrade, or clears it when u is nil. Nodes
+// that already halted on u's plan are swapped at once when u wants it.
+func (c *Client) SetUpgrade(u *Upgrade) ([]NodeStatus, error) {
+	return c.call(Request{Op: OpUpgrade, Upgrade: u})
+}
 
 func (c *Client) Start(sel string) ([]NodeStatus, error) {
 	return c.call(Request{Op: OpStart, Nodes: sel})
@@ -72,9 +90,10 @@ func (c *Client) Kill(sel string) ([]NodeStatus, error) {
 }
 
 // Restart stops then starts sel; a non-empty binary becomes the node's
-// binary from now on.
-func (c *Client) Restart(sel, binary string, timeout time.Duration) ([]NodeStatus, error) {
-	return c.call(Request{Op: OpRestart, Nodes: sel, Binary: binary, Timeout: timeout})
+// binary from now on, and a non-empty version is recorded as the version
+// the node runs.
+func (c *Client) Restart(sel, binary, version string, timeout time.Duration) ([]NodeStatus, error) {
+	return c.call(Request{Op: OpRestart, Nodes: sel, Binary: binary, Version: version, Timeout: timeout})
 }
 
 // Down stops every node, then the supervisor, and returns once the

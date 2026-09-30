@@ -35,7 +35,7 @@ func newSupervisorRunCmd() *cobra.Command {
 		Short: "Run the supervisor in the foreground until SIGTERM, down, or exit",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			err := supervisor.Run(cmd.Context(), supervisor.Options{LabDir: labDir, Log: cmd.ErrOrStderr()})
+			err := supervisor.Run(cmd.Context(), supervisor.Options{LabDir: labDir, Log: cmd.ErrOrStderr(), RecordVersion: recordVersion(labDir)})
 			if errors.Is(err, supervisor.ErrAlreadyRunning) {
 				return nil
 			}

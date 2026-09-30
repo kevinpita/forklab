@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kevinpita/forklab/internal/lab"
 	"github.com/kevinpita/forklab/internal/supervisor"
 )
 
@@ -180,6 +181,7 @@ func TestLabDeleteIgnoresAStalePidFile(t *testing.T) {
 
 func TestLabResetRequiresDownAndKeepsGenesis(t *testing.T) {
 	dir := newShellLab(t)
+	bin := fakeProfileLab(t, dir, "2.0.0")
 	home := filepath.Join(dir, "node0")
 	files := map[string]string{
 		"data/blockstore.db/000001.log":   "blocks",
@@ -214,11 +216,17 @@ func TestLabResetRequiresDownAndKeepsGenesis(t *testing.T) {
 	}
 
 	code, stdout, stderr := run("lab", "reset", "demo", "--force", "--json")
-	if code != 0 || !strings.Contains(stdout, `"method":"manual"`) {
+	if code != 0 || !strings.Contains(stdout, `"method":"manual"`) || !strings.Contains(stdout, `"version":"2.0.0"`) {
 		t.Fatalf("reset --force: code %d\n%s%s", code, stdout, stderr)
 	}
 	if running(dir) {
 		t.Error("supervisor still answers after reset --force")
+	}
+	if specs, err := supervisor.LoadNodes(dir); err != nil || specs[0].Binary != bin {
+		t.Errorf("nodes.json after reset = %+v, %v; want the creation binary %s", specs, err, bin)
+	}
+	if c, err := lab.Load(dir); err != nil || c.Nodes[0].Version != "2.0.0" {
+		t.Errorf("lab.yaml after reset = %+v, %v; want node0 back on 2.0.0", c, err)
 	}
 	entries, _ := os.ReadDir(filepath.Join(home, "data"))
 	if len(entries) != 1 || entries[0].Name() != "priv_validator_state.json" {

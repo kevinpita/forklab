@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -24,6 +26,9 @@ type Options struct {
 	LabDir string
 	// Subscriber, when set, receives every node log line.
 	Subscriber LineSubscriber
+	// RecordVersion, when set, is told the profile version a node runs once
+	// a restart --binary or an upgrade swap has put it on that binary.
+	RecordVersion func(index int, version string) error
 	// Log defaults to stderr, which the spawner points at supervisor.log.
 	Log io.Writer
 }
@@ -33,9 +38,15 @@ type Options struct {
 const killTimeout = 5 * time.Second
 
 type supervisor struct {
-	paths Paths
-	log   *log.Logger
-	nodes []*node
+	paths         Paths
+	log           *log.Logger
+	nodes         []*node
+	forward       LineSubscriber
+	recordVersion func(index int, version string) error
+
+	// upgrade is the pending upgrade, mirrored in upgrade.json.
+	upMu    sync.Mutex
+	upgrade *Upgrade
 
 	saveMu sync.Mutex
 	// closing is set by down and exit so a node op racing them cannot spawn
@@ -58,7 +69,7 @@ func Run(ctx context.Context, opts Options) error {
 	if logw == nil {
 		logw = os.Stderr
 	}
-	s := &supervisor{paths: Paths{labDir}, log: log.New(logw, "", log.LstdFlags|log.Lmicroseconds), quit: make(chan struct{})}
+	s := &supervisor{paths: Paths{labDir}, log: log.New(logw, "", log.LstdFlags|log.Lmicroseconds), quit: make(chan struct{}), forward: opts.Subscriber, recordVersion: opts.RecordVersion}
 
 	lock, err := tryLock(s.paths.Lock())
 	if errors.Is(err, errLocked) {
@@ -85,13 +96,29 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
+	// The pending upgrade and the halts already seen are known before any
+	// log line is replayed, so a halt that happened while no supervisor
+	// watched, or whose line the last supervisor consumed before dying, is
+	// swapped on adoption.
+	st, err := loadUpgradeState(labDir)
+	if err != nil {
+		return err
+	}
+	s.upgrade = st.Plan
 	for _, spec := range specs {
-		n := &node{log: s.log, sub: opts.Subscriber, spec: spec}
-		if err := n.adopt(); err != nil {
-			s.log.Printf("node %d: adopt: %v", spec.Index, err)
+		n := &node{log: s.log, sub: s, spec: spec}
+		if h, ok := st.Halts[spec.Index]; ok {
+			n.halt, n.swap = &h, SwapHalted
 		}
 		s.nodes = append(s.nodes, n)
 	}
+	for _, n := range s.nodes {
+		if err := n.adopt(); err != nil {
+			s.log.Printf("node %d: adopt: %v", n.spec.Index, err)
+		}
+		s.reconcile(n, s.upgrade)
+	}
+	s.saveState()
 
 	if err := s.paths.CheckSock(); err != nil {
 		return err
@@ -190,10 +217,12 @@ func (s *supervisor) handle(req Request) (resp Response, quit bool) {
 	case OpExit:
 		s.closing.Store(true)
 		quit = true
+	case OpUpgrade:
+		err = s.setUpgrade(req.Upgrade)
 	default:
 		err = fmt.Errorf("unknown op %q", req.Op)
 	}
-	resp.Nodes = s.statuses()
+	resp.Nodes, resp.Upgrade = s.statuses(), s.pending()
 	if err != nil {
 		resp.Error = err.Error()
 	}
@@ -230,15 +259,15 @@ func (s *supervisor) each(req Request) error {
 				errs[k] = errors.New("supervisor is shutting down")
 				return
 			}
-			errs[k] = s.apply(n, req.Op, req.Binary, timeout)
+			errs[k] = s.apply(n, req, timeout)
 		})
 	}
 	wg.Wait()
 	return errors.Join(errs...)
 }
 
-func (s *supervisor) apply(n *node, op Op, binary string, timeout time.Duration) error {
-	switch op {
+func (s *supervisor) apply(n *node, req Request, timeout time.Duration) error {
+	switch req.Op {
 	case OpStart:
 		return n.start()
 	case OpStop:
@@ -246,9 +275,9 @@ func (s *supervisor) apply(n *node, op Op, binary string, timeout time.Duration)
 	case OpKill:
 		return n.signal(syscall.SIGKILL, killTimeout)
 	case OpRestart:
-		return s.restart(n, binary, timeout)
+		return s.restart(n, req.Binary, req.Version, timeout)
 	}
-	return fmt.Errorf("unknown op %q", op)
+	return fmt.Errorf("unknown op %q", req.Op)
 }
 
 // binaryProbe is how long a node must stay up on a new binary before the
@@ -258,7 +287,10 @@ const binaryProbe = time.Second
 // restart persists a new binary only once the node has run on it for
 // binaryProbe. If the node fails to start or dies within that time, the
 // previous binary is restored for the next start and the error reports it.
-func (s *supervisor) restart(n *node, binary string, timeout time.Duration) error {
+// A version is recorded once the node runs on its binary. Once the node
+// runs, a failure to persist is logged, not returned: the process state
+// is right, and reconcile repairs the files on the next start.
+func (s *supervisor) restart(n *node, binary, version string, timeout time.Duration) error {
 	previous := n.currentSpec().Binary
 	if binary != "" {
 		if err := n.setBinary(binary); err != nil {
@@ -274,23 +306,69 @@ func (s *supervisor) restart(n *node, binary string, timeout time.Duration) erro
 	if err := n.signal(syscall.SIGTERM, timeout); err != nil {
 		return restore(err)
 	}
+	logEnd := fileSize(n.currentSpec().LogPath)
 	if err := n.start(); err != nil {
 		return restore(err)
 	}
-	if binary == "" || binary == previous {
-		return nil
-	}
-	// A child that died at once may already be recorded as exited, leaving no
-	// running process to wait on.
-	if p := n.running(); p != nil {
-		select {
-		case <-p.gone:
-		case <-time.After(binaryProbe):
-			return s.saveNodes()
+	if binary != "" && binary != previous {
+		// A child that died at once may already be recorded as exited,
+		// leaving no running process to wait on.
+		p := n.running()
+		if p != nil {
+			select {
+			case <-p.gone:
+				p = nil
+			case <-time.After(binaryProbe):
+			}
+		}
+		if p == nil {
+			st := n.status()
+			return restore(fmt.Errorf("node %d exited within %s on %s (exit code %v, signal %q); keeping %s%s", n.spec.Index, binaryProbe, binary, deref(st.ExitCode), st.Signal, previous, logSince(n.currentSpec().LogPath, logEnd)))
+		}
+		if err := s.saveNodes(); err != nil {
+			s.log.Printf("node %d: nodes.json: %v", n.spec.Index, err)
 		}
 	}
-	st := n.status()
-	return restore(fmt.Errorf("node %d exited within %s on %s (exit code %v, signal %q); keeping %s", n.spec.Index, binaryProbe, binary, deref(st.ExitCode), st.Signal, previous))
+	if err := s.record(n, version); err != nil {
+		s.log.Printf("node %d: record version %s: %v", n.spec.Index, version, err)
+	}
+	// Swapped means recorded, so the halt is settled last.
+	s.settleSwap(n, n.currentSpec().Binary)
+	return nil
+}
+
+// failLogLines bounds what a failed start's error quotes from the node log.
+const failLogLines = 10
+
+// logSince returns what the node wrote to its log from offset on, as the
+// last failLogLines lines indented under a header, or "" when nothing.
+func logSince(path string, offset int64) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.NewSectionReader(f, offset, 64<<10))
+	if err != nil || len(bytes.TrimSpace(data)) == 0 {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) > failLogLines {
+		lines = lines[len(lines)-failLogLines:]
+	}
+	return "\nit logged:\n  " + strings.Join(lines, "\n  ")
+}
+
+// record tells RecordVersion which profile version node n now runs. Calls
+// are serialized: the callback rewrites lab.yaml, and nodes swap
+// concurrently.
+func (s *supervisor) record(n *node, version string) error {
+	if version == "" || s.recordVersion == nil {
+		return nil
+	}
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
+	return s.recordVersion(n.spec.Index, version)
 }
 
 func deref(code *int) any {

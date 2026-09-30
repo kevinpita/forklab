@@ -306,6 +306,10 @@ func TestProposalFileMatchesWhatTheChainAccepted(t *testing.T) {
 	if got, _ := json.Marshal(p); !strings.Contains(string(got), `"expedited":true`) {
 		t.Errorf("expedited proposal JSON lacks the flag: %s", got)
 	}
+	cancel, _ := json.Marshal(CancelUpgradeMsg("cosmos10d07y265gmmuvt4z0w9aw880jnsr700j6zn9kn"))
+	if want := `{"@type":"/cosmos.upgrade.v1beta1.MsgCancelUpgrade","authority":"cosmos10d07y265gmmuvt4z0w9aw880jnsr700j6zn9kn"}`; string(cancel) != want {
+		t.Errorf("cancel JSON = %s, want %s", cancel, want)
+	}
 }
 
 func TestUpdateParamsMsg(t *testing.T) {

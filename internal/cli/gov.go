@@ -3,7 +3,6 @@ package cli
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -184,33 +183,13 @@ func (f proposalFlags) validate() error {
 }
 
 // upgradeWarning is chain.CheckUpgradeHeight's complaint about the plan in f,
-// or empty. It uses the chain's measured block time, or the profile's before
-// enough blocks exist.
+// or empty. gov submit only warns; upgrade schedule refuses.
 func upgradeWarning(ctx context.Context, c chain.CLI, rpc *chain.Client, profileBlockTime time.Duration, f proposalFlags) (string, error) {
-	params, err := c.GovParams(ctx)
+	current, blockTime, voting, err := planWindow(ctx, c, rpc, profileBlockTime, f.expedited)
 	if err != nil {
 		return "", err
 	}
-	period := params.VotingPeriod
-	if f.expedited {
-		period = params.ExpeditedVotingPeriod
-	}
-	voting, err := time.ParseDuration(period)
-	if err != nil {
-		return "", fmt.Errorf("gov voting period %q: %w", period, err)
-	}
-	st, err := rpc.Status(ctx)
-	if err != nil {
-		return "", err
-	}
-	blockTime, err := rpc.AvgBlockTime(ctx, 10)
-	if errors.Is(err, chain.ErrNotEnoughBlocks) || blockTime <= 0 {
-		blockTime, err = profileBlockTime, nil
-	}
-	if err != nil {
-		return "", err
-	}
-	if err := chain.CheckUpgradeHeight(f.height, st.LatestHeight, blockTime, voting); err != nil {
+	if err := chain.CheckUpgradeHeight(f.height, current, blockTime, voting); err != nil {
 		return err.Error(), nil
 	}
 	return "", nil
@@ -251,13 +230,9 @@ func buildProposal(ctx context.Context, c chain.CLI, f proposalFlags) (chain.Pro
 	p.Summary = cmp.Or(p.Summary, p.Title)
 	p.Metadata = cmp.Or(p.Metadata, p.Title)
 	if p.Deposit == "" {
-		params, err := c.GovParams(ctx)
-		if err != nil {
+		var err error
+		if p.Deposit, err = minDeposit(ctx, c, f.expedited); err != nil {
 			return p, err
-		}
-		p.Deposit = params.MinDeposit.String()
-		if f.expedited {
-			p.Deposit = params.ExpeditedMinDeposit.String()
 		}
 	}
 	return p, nil

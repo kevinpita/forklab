@@ -2,6 +2,7 @@ package lab
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -21,10 +22,32 @@ const (
 )
 
 // Reset wipes every node's chain data so the lab replays from genesis on its
-// next start. Config, keys, and genesis stay. The lab must be down.
-func Reset(ctx context.Context, dir string) ([]ResetMethod, error) {
+// next start. Replaying needs the binary the lab was created with, so every
+// node goes back to it (binary is that path, resolved for Config.Version)
+// in nodes.json and lab.yaml, and any pending upgrade is forgotten. Keys and
+// genesis stay. The lab must be down.
+func Reset(ctx context.Context, dir, binary string) ([]ResetMethod, error) {
+	c, err := Load(dir)
+	if err != nil {
+		return nil, err
+	}
 	specs, err := supervisor.LoadNodes(dir)
 	if err != nil {
+		return nil, err
+	}
+	for i := range specs {
+		specs[i].Binary = binary
+	}
+	if err := supervisor.SaveNodes(dir, specs); err != nil {
+		return nil, err
+	}
+	for i := range c.Nodes {
+		c.Nodes[i].Version = c.Version
+	}
+	if err := Save(dir, c); err != nil {
+		return nil, err
+	}
+	if err := os.Remove(supervisor.Paths{Dir: dir}.Upgrade()); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
 	methods := make([]ResetMethod, len(specs))

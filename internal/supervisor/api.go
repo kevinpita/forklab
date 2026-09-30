@@ -22,25 +22,32 @@ const (
 	// OpExit makes the supervisor exit and leaves the nodes running; the next
 	// supervisor adopts them.
 	OpExit Op = "exit"
+	// OpUpgrade sets the pending upgrade the supervisor swaps halted nodes
+	// to, or clears it when Request.Upgrade is nil.
+	OpUpgrade Op = "upgrade"
 )
 
 const All = "all"
 
 // Request is one API call. Nodes is a node index or All for the node ops.
 // Timeout bounds how long stop, restart, and down wait for SIGTERM to work;
-// zero means DefaultStopTimeout. Binary is restart's optional new path.
+// zero means DefaultStopTimeout. Binary is restart's optional new path and
+// Version the profile version it is, recorded once the node runs on it.
 type Request struct {
 	Op      Op            `json:"op"`
 	Nodes   string        `json:"nodes,omitempty"`
 	Binary  string        `json:"binary,omitempty"`
+	Version string        `json:"version,omitempty"`
 	Timeout time.Duration `json:"timeout_ns,omitempty"`
+	Upgrade *Upgrade      `json:"upgrade,omitempty"`
 }
 
-// Response carries every node's status after the operation. Error is set
-// when the operation failed for at least one node.
+// Response carries every node's status and the pending upgrade after the
+// operation. Error is set when the operation failed for at least one node.
 type Response struct {
-	Error string       `json:"error,omitempty"`
-	Nodes []NodeStatus `json:"nodes"`
+	Error   string       `json:"error,omitempty"`
+	Nodes   []NodeStatus `json:"nodes"`
+	Upgrade *Upgrade     `json:"upgrade,omitempty"`
 }
 
 const DefaultStopTimeout = 30 * time.Second

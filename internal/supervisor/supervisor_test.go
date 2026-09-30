@@ -58,7 +58,13 @@ func (h *harness) lab(n int, nodeArgs ...string) *lab {
 	if err := supervisor.SaveNodes(dir, l.specs); err != nil {
 		h.t.Fatal(err)
 	}
-	h.t.Cleanup(func() { killLab(l) })
+	h.t.Cleanup(func() {
+		killLab(l)
+		if h.t.Failed() {
+			log, _ := os.ReadFile(supervisor.Paths{Dir: dir}.Log())
+			h.t.Logf("supervisor.log:\n%s", log)
+		}
+	})
 	return l
 }
 
@@ -116,7 +122,12 @@ func up(t *testing.T, l *lab) *supervisor.Client {
 
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	waitUpTo(t, 5*time.Second, what, cond)
+}
+
+func waitUpTo(t *testing.T, d time.Duration, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
@@ -257,7 +268,7 @@ func TestNodeLifecycle(t *testing.T) {
 		return n.State == supervisor.StateExited && n.ExitCode != nil && *n.ExitCode == 3
 	})
 
-	nodes, err = c.Restart("1", "", 2*time.Second)
+	nodes, err = c.Restart("1", "", "", 2*time.Second)
 	if err != nil || nodes[1].State != supervisor.StateRunning {
 		t.Fatalf("restart after crash: %+v, %v", nodes[1], err)
 	}
@@ -377,14 +388,14 @@ func TestRestartWithBinaryOverridePersists(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := c.Restart("0", filepath.Join(t.TempDir(), "missing"), time.Second); err == nil {
+	if _, err := c.Restart("0", filepath.Join(t.TempDir(), "missing"), "", time.Second); err == nil {
 		t.Fatal("restart with a missing binary succeeded")
 	}
 	if nodes, _ := c.Status(); nodes[0].PID != pid {
 		t.Fatalf("a rejected restart touched the node: %+v", nodes[0])
 	}
 
-	nodes, err := c.Restart("0", v2, 2*time.Second)
+	nodes, err := c.Restart("0", v2, "", 2*time.Second)
 	if err != nil || nodes[0].State != supervisor.StateRunning || nodes[0].Binary != v2 || nodes[0].PID == pid {
 		t.Fatalf("restart with %s: %+v, %v", v2, nodes[0], err)
 	}
@@ -416,7 +427,7 @@ func TestRestartOnABinaryThatExitsAtOnceKeepsTheOldOne(t *testing.T) {
 	}
 	for i := range 10 {
 		start := time.Now()
-		nodes, err := c.Restart("0", bad, 5*time.Second)
+		nodes, err := c.Restart("0", bad, "", 5*time.Second)
 		if err == nil || !strings.Contains(err.Error(), "keeping "+os.Args[0]) {
 			t.Fatalf("restart %d on %s: %v, %+v; want it refused", i, bad, err, nodes)
 		}

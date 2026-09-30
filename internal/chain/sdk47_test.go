@@ -96,12 +96,16 @@ func TestExecNeedsNode(t *testing.T) {
 }
 
 func TestCheckUpgradeHeight(t *testing.T) {
-	// 30s of voting at 1s blocks from height 100 ends near height 130.
-	if err := CheckUpgradeHeight(131, 100, time.Second, 30*time.Second); err != nil {
-		t.Errorf("31 blocks out: %v", err)
+	// 30s of voting at 1s blocks from height 100 is tallied at height 130,
+	// so the plan needs two more blocks of margin.
+	if err := CheckUpgradeHeight(132, 100, time.Second, 30*time.Second); err != nil {
+		t.Errorf("32 blocks out: %v", err)
+	}
+	if err := CheckUpgradeHeight(131, 100, time.Second, 30*time.Second); err == nil {
+		t.Error("31 blocks out passed; the tally block itself is too early")
 	}
 	err := CheckUpgradeHeight(120, 100, time.Second, 30*time.Second)
-	if err == nil || !strings.Contains(err.Error(), "height 120 is 20 blocks away") || !strings.Contains(err.Error(), "at least 130") {
+	if err == nil || !strings.Contains(err.Error(), "height 120 is 20 blocks away") || !strings.Contains(err.Error(), "at least 132") {
 		t.Errorf("20 blocks out: %v", err)
 	}
 	// Slow blocks make a close height fine.

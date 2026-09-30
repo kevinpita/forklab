@@ -151,17 +151,21 @@ func newNodeKillCmd(a *app, labDir *string) *cobra.Command {
 
 func newNodeRestartCmd(a *app, labDir *string) *cobra.Command {
 	var timeout time.Duration
-	var binary string
+	var binary, version string
 	cmd := &cobra.Command{
 		Use:   "restart <i|all>",
 		Short: "Stop a node and start it again, optionally with another binary",
 		Args:  nodeArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			path, version, err := restartBinary(cmd.Context(), a, cmd.ErrOrStderr(), *labDir, binary, version)
+			if err != nil {
+				return err
+			}
 			c, err := ensureSupervisor(cmd.Context(), *labDir)
 			if err != nil {
 				return err
 			}
-			nodes, err := c.Restart(args[0], binary, timeout)
+			nodes, err := c.Restart(args[0], path, version, timeout)
 			if err != nil {
 				return err
 			}
@@ -169,7 +173,8 @@ func newNodeRestartCmd(a *app, labDir *string) *cobra.Command {
 		},
 	}
 	cmd.Flags().DurationVar(&timeout, "timeout", supervisor.DefaultStopTimeout, "how long to wait for the node to exit")
-	cmd.Flags().StringVar(&binary, "binary", "", "path of the binary to run from now on")
+	cmd.Flags().StringVar(&binary, "binary", "", "binary to run from now on: a version of the lab's profile, or a path containing a slash")
+	cmd.Flags().StringVar(&version, "version", "", "profile version a --binary path is, recorded in lab.yaml")
 	return cmd
 }
 

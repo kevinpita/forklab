@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kevinpita/forklab/internal/binary"
 	"github.com/kevinpita/forklab/internal/chain"
 	"github.com/kevinpita/forklab/internal/cli/output"
 	"github.com/kevinpita/forklab/internal/lab"
@@ -237,13 +238,15 @@ type resetNode struct {
 }
 
 type labReset struct {
-	Name  string      `json:"name"`
-	Dir   string      `json:"dir"`
-	Nodes []resetNode `json:"nodes"`
+	Name string `json:"name"`
+	Dir  string `json:"dir"`
+	// Version is the creation version every node is back on.
+	Version string      `json:"version"`
+	Nodes   []resetNode `json:"nodes"`
 }
 
 func (r labReset) WriteHuman(w io.Writer) error {
-	_, err := fmt.Fprintf(w, "reset lab %s; its next up replays from genesis\n", r.Name)
+	_, err := fmt.Fprintf(w, "reset lab %s; its next up replays from genesis on %s\n", r.Name, r.Version)
 	return err
 }
 
@@ -275,11 +278,19 @@ func newLabResetCmd(a *app) *cobra.Command {
 					return fmt.Errorf("lab %s: %w; stop it first with forklab lab down %s, or pass --force", c.Name, lab.ErrRunning, c.Name)
 				}
 			}
-			methods, err := lab.Reset(cmd.Context(), dir)
+			p, err := c.Profile.Profile()
+			if err != nil {
+				return fmt.Errorf("lab %s: profile: %w", c.Name, err)
+			}
+			b, err := resolveBinary(cmd.Context(), a, cmd.ErrOrStderr(), p, c.Version, binary.Options{})
 			if err != nil {
 				return fmt.Errorf("lab %s: %w", c.Name, err)
 			}
-			out := labReset{Name: c.Name, Dir: dir}
+			methods, err := lab.Reset(cmd.Context(), dir, b.Path)
+			if err != nil {
+				return fmt.Errorf("lab %s: %w", c.Name, err)
+			}
+			out := labReset{Name: c.Name, Dir: dir, Version: c.Version}
 			for i, n := range c.Nodes {
 				out.Nodes = append(out.Nodes, resetNode{Name: n.Name, Method: methods[i]})
 			}

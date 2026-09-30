@@ -33,6 +33,12 @@ func SoftwareUpgradeMsg(authority string, plan Plan) map[string]any {
 	}
 }
 
+// CancelUpgradeMsg is MsgCancelUpgrade signed by authority, the gov module
+// account. It clears whatever plan is scheduled.
+func CancelUpgradeMsg(authority string) map[string]any {
+	return map[string]any{"@type": "/cosmos.upgrade.v1beta1.MsgCancelUpgrade", "authority": authority}
+}
+
 // UpdateParamsMsgType is the MsgUpdateParams type URL of an SDK module. gov
 // moved to v1; the others are still v1beta1.
 func UpdateParamsMsgType(module string) string {
@@ -122,16 +128,21 @@ func ProposalID(r TxResult) (uint64, error) {
 	return strconv.ParseUint(v, 10, 64)
 }
 
+// upgradeMargin is how many blocks past the end of voting a plan must land:
+// the tally runs in the end blocker of the block whose time passes the
+// voting end, and the plan height must be strictly after that block.
+const upgradeMargin = 2
+
 // CheckUpgradeHeight fails when the chain, at blockTime per block from
 // height current, likely reaches the plan height before a proposal
-// submitted now ends its voting period. The proposal would then fail with
-// "upgrade cannot be scheduled in the past".
+// submitted now ends its voting period and is tallied. The proposal would
+// then fail with "upgrade cannot be scheduled in the past".
 func CheckUpgradeHeight(height, current int64, blockTime, votingPeriod time.Duration) error {
-	eta := time.Duration(height-current) * blockTime
-	if eta >= votingPeriod {
+	need := current + int64((votingPeriod+blockTime-1)/blockTime) + upgradeMargin
+	if height >= need {
 		return nil
 	}
-	need := current + int64((votingPeriod+blockTime-1)/blockTime)
+	eta := time.Duration(height-current) * blockTime
 	return fmt.Errorf("height %d is %d blocks away, about %s at %s per block, but voting takes %s; use a height of at least %d",
 		height, height-current, eta.Round(time.Second), blockTime.Round(time.Millisecond), votingPeriod, need)
 }
