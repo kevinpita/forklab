@@ -1,5 +1,18 @@
 # Development
 
+Snapshot discovery implements `snapshot.Provider` (`Supports` and `Resolve`)
+in a separate file per provider. `snapshot.Resolver` selects the first
+provider that supports a source; direct archive URLs and local files pass
+through when none matches. Polkachu's implementation is in
+`internal/snapshot/polkachu.go`. Additional providers can be supplied to a
+`Resolver`; register built-in providers in `snapshot.Resolve`.
+
+Genesis corrections implement `genesis.Patcher`. The built-in `JQPatcher`
+runs the filters selected by the profile's optional `patches_file`, then
+its inline filters. An empty filter list performs no custom corrections.
+Keep chain-specific filters in one YAML file; the normal validator takeover
+and accounting stay in the shared fork flow. See [profiles](profiles.md).
+
 ## Toolchain
 
 The toolchain (Go 1.27, gofumpt, golangci-lint) comes from

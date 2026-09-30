@@ -29,6 +29,7 @@ type Document struct {
 	UpgradeName  string                    `yaml:"upgrade_name" json:"upgrade_name"`
 	Binaries     map[string]BinaryDocument `yaml:"binaries" json:"binaries"`
 	Snapshots    map[string]string         `yaml:"snapshots,omitempty" json:"snapshots,omitempty"`
+	PatchesFile  string                    `yaml:"patches_file,omitempty" json:"patches_file,omitempty"`
 	FreshPatches []string                  `yaml:"fresh_patches,omitempty" json:"fresh_patches,omitempty"`
 	ForkPatches  []string                  `yaml:"fork_patches,omitempty" json:"fork_patches,omitempty"`
 }
@@ -70,8 +71,8 @@ type Profile struct {
 	UpgradeName Template
 	Binaries    map[string]Source
 	Snapshots   map[string]Template
-	// FreshPatches and ForkPatches are gojq filters applied last, in order,
-	// to fresh and forked genesis respectively.
+	// FreshPatches and ForkPatches include resolved file filters followed by
+	// inline filters, applied last to fresh and forked genesis respectively.
 	FreshPatches []string
 	ForkPatches  []string
 }

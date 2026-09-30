@@ -148,11 +148,7 @@ func newProfileValidateCmd(a *app) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			arg := args[0]
 			if strings.ContainsRune(arg, os.PathSeparator) || strings.HasSuffix(arg, ".yaml") || strings.HasSuffix(arg, ".yml") {
-				data, err := os.ReadFile(arg)
-				if err != nil {
-					return err
-				}
-				d, _, err := profile.Load(data)
+				d, _, err := profile.LoadFile(arg)
 				if err != nil {
 					return fmt.Errorf("profile file %s:\n%w", arg, err)
 				}
@@ -193,7 +189,7 @@ func newProfileCreateCmd(a *app) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				d = base.Doc
+				d = f.document(base)
 			}
 			d.Name = name
 			if err := f.apply(cmd.Flags(), &d); err != nil {
@@ -235,7 +231,7 @@ func newProfileEditCmd(a *app) *cobra.Command {
 			if !changed {
 				return output.Usagef("no field flags given; see profile edit --help")
 			}
-			d := e.Doc
+			d := f.document(e)
 			if err := f.apply(cmd.Flags(), &d); err != nil {
 				return err
 			}
@@ -285,6 +281,7 @@ var scalarFlags = []struct {
 	{"voting-period", "gov.voting_period", "gov voting period, such as 30s", func(d *profile.Document, v string) { d.Gov.VotingPeriod = v }},
 	{"expedited-voting-period", "gov.expedited_voting_period", "gov expedited voting period; empty unsets it", func(d *profile.Document, v string) { d.Gov.ExpeditedVotingPeriod = v }},
 	{"upgrade-name", "upgrade_name", "upgrade plan name template, such as v{version}", func(d *profile.Document, v string) { d.UpgradeName = v }},
+	{"patches-file", "patches_file", "genesis patch YAML file relative to the profile; empty unsets it", func(d *profile.Document, v string) { d.PatchesFile = v }},
 }
 
 // listFlags maps field path prefixes of list and map fields to their flag.
@@ -304,6 +301,15 @@ type docFlags struct {
 	binaryFields                                [len(binaryFieldFlags)][]string
 	removeBinaries, removeSnapshots             []string
 	removeExtraPorts                            []string
+}
+
+// Clearing a mode's corrections includes file filters. Preserve the other
+// mode's resolved filters inline before applying the requested clear.
+func (f docFlags) document(e profile.Entry) profile.Document {
+	if f.noFreshPatches || f.noForkPatches {
+		return e.Snapshot()
+	}
+	return e.Doc
 }
 
 // binaryFieldFlags set one field of an existing binary entry, as

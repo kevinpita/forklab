@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-//go:embed builtin/*.yaml
+//go:embed builtin/*.yaml builtin/patches/*.yaml
 var builtinFS embed.FS
 
 // ErrNotFound means no user or built-in profile has the name.
@@ -39,6 +39,16 @@ type Entry struct {
 	Profile Profile
 }
 
+// Snapshot makes the profile self-contained for a lab. Later edits to or
+// removal of a patch file cannot change the corrections the lab was built with.
+func (e Entry) Snapshot() Document {
+	d := e.Doc
+	d.PatchesFile = ""
+	d.FreshPatches = slices.Clone(e.Profile.FreshPatches)
+	d.ForkPatches = slices.Clone(e.Profile.ForkPatches)
+	return d
+}
+
 // DefaultStore is $FORKLAB_CONFIG_DIR/profiles, else
 // $XDG_CONFIG_HOME/forklab/profiles, else ~/.config/forklab/profiles.
 func DefaultStore() (Store, error) {
@@ -61,7 +71,7 @@ func Load(data []byte) (Document, Profile, error) {
 	if err != nil {
 		return d, Profile{}, err
 	}
-	p, err := d.Profile()
+	p, err := profileAt(d, ".")
 	return d, p, err
 }
 
@@ -92,7 +102,7 @@ func (s Store) Get(name string) (Entry, error) {
 			err = Errors{{Path: "name", Message: fmt.Sprintf("%q does not match file name %s", e.Doc.Name, filepath.Base(path))}}
 		}
 		if err == nil {
-			e.Profile, err = e.Doc.Profile()
+			e.Profile, err = profileAt(e.Doc, filepath.Dir(path))
 		}
 		if err != nil {
 			return Entry{}, fmt.Errorf("profile %s (%s):\n%w", name, path, err)
@@ -156,7 +166,7 @@ func (s Store) List() ([]Listing, error) {
 
 // Save validates d and writes it as a user profile, replacing any existing one.
 func (s Store) Save(d Document) (Entry, error) {
-	p, err := d.Profile()
+	p, err := profileAt(d, s.Dir)
 	if err != nil {
 		return Entry{}, err
 	}

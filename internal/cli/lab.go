@@ -147,6 +147,10 @@ func newLabCreateCmd(a *app) *cobra.Command {
 				if err != nil {
 					return output.Usage(err)
 				}
+				src, err = snapshot.Resolve(cmd.Context(), nil, src)
+				if err != nil {
+					return err
+				}
 				if err := snapshot.Reachable(cmd.Context(), nil, src, filepath.Join(root, "snapshots")); err != nil {
 					return err
 				}

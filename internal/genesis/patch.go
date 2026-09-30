@@ -10,6 +10,18 @@ import (
 	"github.com/itchyny/gojq"
 )
 
+// Patcher applies optional chain-specific corrections to an exported or fresh
+// genesis. Validator takeover and accounting remain part of the normal flow.
+type Patcher interface {
+	Apply(*Genesis) error
+}
+
+// JQPatcher runs filters from a chain's patch file and inline profile fields.
+// An empty list leaves the genesis unchanged.
+type JQPatcher []string
+
+func (p JQPatcher) Apply(g *Genesis) error { return ApplyPatches(g, p) }
+
 // ApplyPatches runs each gojq expression over the whole genesis document, in
 // order, and keeps the single value it produces. Numbers keep their
 // precision, and every top-level field and app_state module the patches leave

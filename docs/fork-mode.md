@@ -7,7 +7,7 @@ creates a `gov` account with a delegation so that you can pass proposals, and
 funds test accounts.
 
 ```sh
-forklab lab create xrp-fork --profile xrplevm --version 11.1.1 --fork polkachu
+forklab lab create xrp-fork --profile xrplevm --version 11.2.0 --validators 2 --fork polkachu
 ```
 
 ## Snapshots
@@ -19,6 +19,20 @@ forklab lab create xrp-fork --profile xrplevm --version 11.1.1 --fork polkachu
 - A local archive file in one of those formats.
 
 `--version` must be a binary version that can run the snapshot's state.
+
+The built-in `polkachu` source resolves the archive link from Polkachu's
+XRPL EVM snapshot page each time you create a lab. The cache uses that
+dated archive URL, so a new daily snapshot does not reuse yesterday's
+export. Polkachu's displayed node version can be stale; choose the binary
+version currently running the chain.
+
+The stock XRPL EVM 11.2.0 binary successfully exported Polkachu's snapshot
+at height 7925443 and started a two-validator fork. XRPL EVM's export needs
+the profile's genesis corrections, including matching ERC20 allowance
+contract addresses to their token pairs. Fork mode replaces existing
+validators' consensus keys and keeps `gen_txs` empty, avoiding the conflicting
+validator updates produced by adding gentxs to an exported staking state.
+No SDK changes or custom chain build are needed for this tested restore.
 
 After the rewrite, the profile's `fork_patches` fix what the takeover leaves
 inconsistent for that chain. See

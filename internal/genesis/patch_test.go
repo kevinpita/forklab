@@ -34,6 +34,22 @@ func TestApplyPatches(t *testing.T) {
 	modulesUnchanged(t, input, output, "slashing", "mint")
 }
 
+func TestEmptyPatcherLeavesGenesisUnchanged(t *testing.T) {
+	g := load(t, "simd_export.json")
+	before, err := g.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var patcher genesis.Patcher = genesis.JQPatcher(nil)
+	if err := patcher.Apply(g); err != nil {
+		t.Fatal(err)
+	}
+	after, err := g.Bytes()
+	if err != nil || string(before) != string(after) {
+		t.Fatalf("empty patcher changed genesis: %v", err)
+	}
+}
+
 func TestApplyPatchesInitialHeightStaysAString(t *testing.T) {
 	g := load(t, "simd_export.json")
 	if err := genesis.ApplyPatches(g, []string{`.initial_height = (.initial_height | tonumber) + 1`}); err != nil {

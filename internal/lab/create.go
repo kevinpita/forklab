@@ -217,7 +217,7 @@ func (b *builder) build() (Config, error) {
 		Version:    b.in.Version,
 		Validators: b.in.Validators,
 		CreatedAt:  time.Now().UTC().Truncate(time.Second),
-		Profile:    b.in.Profile.Doc,
+		Profile:    b.in.Profile.Snapshot(),
 	}
 	if b.exported != nil {
 		c.Mode = ModeFork
@@ -247,10 +247,10 @@ func (b *builder) build() (Config, error) {
 	}
 
 	var g *genesis.Genesis
-	patches := b.p.FreshPatches
+	patches := genesis.JQPatcher(b.p.FreshPatches)
 	if c.Mode == ModeFork {
 		g, err = b.forkGenesis(c)
-		patches = b.p.ForkPatches
+		patches = genesis.JQPatcher(b.p.ForkPatches)
 	} else {
 		g, err = b.freshGenesis(c)
 	}
@@ -428,7 +428,7 @@ func (b *builder) forkGenesis(c Config) (*genesis.Genesis, error) {
 
 // writeGenesis applies the gov patch and the profile's mode patches, then
 // installs the result in every node and validates it.
-func (b *builder) writeGenesis(g *genesis.Genesis, patchName string, patches []string) error {
+func (b *builder) writeGenesis(g *genesis.Genesis, patchName string, patches genesis.Patcher) error {
 	if err := genesis.GovPatch(g, genesis.GovParams{
 		VotingPeriod:          b.p.Gov.VotingPeriod,
 		ExpeditedVotingPeriod: b.p.Gov.ExpeditedVotingPeriod,
@@ -436,7 +436,7 @@ func (b *builder) writeGenesis(g *genesis.Genesis, patchName string, patches []s
 	}); err != nil {
 		return err
 	}
-	if err := genesis.ApplyPatches(g, patches); err != nil {
+	if err := patches.Apply(g); err != nil {
 		return fmt.Errorf("%s: %w", patchName, err)
 	}
 	data, err := g.Bytes()

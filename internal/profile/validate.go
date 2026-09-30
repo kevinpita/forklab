@@ -73,9 +73,8 @@ func (c *checker) template(path, v string) Template {
 	return Template(v)
 }
 
-// Profile validates the document and returns its typed form. The error is
-// Errors listing every invalid field.
-func (d Document) Profile() (Profile, error) {
+// validate checks the document's inline fields without resolving patch files.
+func (d Document) validate() (Profile, error) {
 	var c checker
 	p := Profile{
 		Name:         c.match("name", d.Name, nameRe, "name (lowercase letters, digits, - and _)"),

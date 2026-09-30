@@ -52,6 +52,7 @@ Both set a 30s voting period and a 20s expedited voting period. Run
 | `upgrade_name` | Upgrade plan name template, such as `v{version}` |
 | `binaries` | Binary source per version (see below) |
 | `snapshots` | Snapshot name to URL, for `--fork <name>` |
+| `patches_file` | Optional YAML file containing fresh and fork corrections |
 | `fresh_patches` | gojq expressions applied last to a fresh genesis |
 | `fork_patches` | gojq expressions applied last to a forked genesis |
 
@@ -66,9 +67,43 @@ and the `extra_ports` values, plus pprof on 6060) and add 100 per node.
 A fresh genesis comes from the chain's own `init` and `genesis` commands, so it
 lacks chain setup that mainnet has, such as denom metadata or module params.
 `fresh_patches` add that setup. A forked genesis already has it from mainnet
-state, and `fork_patches` fix only what the takeover rewrite leaves
-inconsistent for that chain. forklab applies the patches in order, after its
-own rewrite and the gov patch.
+state, and `fork_patches` fix export defects or what the takeover rewrite
+leaves inconsistent for that chain. forklab applies the patches in order,
+after its own rewrite and the gov patch.
+
+Keep a chain's corrections together in a separate YAML file and select it
+explicitly in the profile:
+
+```yaml
+# mychain.yaml
+patches_file: patches/mychain.yaml
+```
+
+```yaml
+# patches/mychain.yaml
+fresh_patches:
+  - '.app_state.staking.params.bond_denom = "umy"'
+fork_patches:
+  - '.app_state.custom.params.example = "corrected-value"'
+```
+
+Relative file paths are resolved beside the profile; absolute paths also
+work. File filters run first, followed by inline profile filters, so inline
+filters can override a shared correction. Missing files, unknown fields,
+invalid jq, and multiple YAML documents fail validation before lab creation.
+`profile create` and `profile edit` accept `--patches-file`; passing an empty
+value removes the reference.
+`--no-fork-patches` and `--no-fresh-patches` also clear that mode's file
+filters, preserving the other mode's resolved filters inline.
+
+XRPL EVM selects `patches_file: builtin:xrplevm.yaml`, which loads its
+bundled corrections from `internal/profile/builtin/patches/xrplevm.yaml`.
+That file contains its IBC metadata, ratelimit, and ERC20 corrections.
+Those fixes are opt-in for XRPL EVM, not applied to every IBC chain. Profiles
+without a patch file or inline filters run with no custom corrections.
+
+Each lab stores the resolved filters in its own profile copy, so moving,
+editing, or deleting the original patch file does not change an existing lab.
 
 ## Binary sources
 

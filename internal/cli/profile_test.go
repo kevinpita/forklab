@@ -143,6 +143,36 @@ func TestProfileCreateFromBuiltinThenEditShadows(t *testing.T) {
 	runJSON(t, 1, "profile", "delete", "simd")
 }
 
+func TestProfilePatchFileFlagsAndClearingBundledCorrections(t *testing.T) {
+	dir := configDir(t)
+	patchPath := filepath.Join(dir, "profiles", "corrections.yaml")
+	if err := os.MkdirAll(filepath.Dir(patchPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(patchPath, []byte("fork_patches: ['.app_state.x = 1']\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	created := runJSON(t, 0, "profile", "create", "custom", "--from", "simd", "--patches-file", "corrections.yaml")
+	if created.Data.Profile.PatchesFile != "corrections.yaml" {
+		t.Fatal("patch file reference was not saved")
+	}
+	runJSON(t, 0, "profile", "validate", filepath.Join(dir, "profiles", "custom.yaml"))
+	runJSON(t, 0, "profile", "edit", "custom", "--patches-file", "")
+	if p := runJSON(t, 0, "profile", "show", "custom").Data.Profile; p.PatchesFile != "" {
+		t.Fatal("empty flag did not remove the reference")
+	}
+	cleared := runJSON(t, 0, "profile", "edit", "xrplevm", "--no-fork-patches").Data.Profile
+	p, err := cleared.Profile()
+	if err != nil || len(p.ForkPatches) != 0 || len(p.FreshPatches) == 0 {
+		t.Fatalf("clearing fork corrections lost fresh corrections or kept file filters: %v", err)
+	}
+	cleared = runJSON(t, 0, "profile", "edit", "xrplevm", "--no-fresh-patches").Data.Profile
+	p, err = cleared.Profile()
+	if err != nil || len(p.FreshPatches) != 0 || len(p.ForkPatches) != 0 {
+		t.Fatalf("clearing all corrections failed: %v", err)
+	}
+}
+
 func TestProfileList(t *testing.T) {
 	configDir(t)
 	runJSON(t, 0, "profile", "create", "xrplevm", "--from", "xrplevm", "--block-time", "2s")

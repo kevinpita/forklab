@@ -50,6 +50,10 @@ func Key(rawURL string) string {
 // Fetch returns a local archive for src. A URL is downloaded into dir (see
 // Download); anything else must be an existing file and is used in place.
 func Fetch(ctx context.Context, client *http.Client, src, dir string, progress Progress) (string, error) {
+	src, err := Resolve(ctx, client, src)
+	if err != nil {
+		return "", err
+	}
 	if IsURL(src) {
 		return Download(ctx, client, src, dir, progress)
 	}
