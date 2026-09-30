@@ -75,6 +75,11 @@ func (c CLI) query(ctx context.Context, args ...string) ([]byte, error) {
 	return c.run(ctx, append(append([]string{"q"}, args...), "--output", "json", "--node", c.Node, "--home", c.Home)...)
 }
 
+// Query runs a module query using the stock binary and returns its JSON.
+func (c CLI) Query(ctx context.Context, args ...string) ([]byte, error) {
+	return c.query(ctx, args...)
+}
+
 // TxFlags are the flags every lab transaction takes after `tx <module> <msg>`.
 func (c CLI) TxFlags(from string) []string {
 	return []string{
@@ -101,7 +106,21 @@ func (e *TxError) Error() string {
 // from, broadcasts it, and returns the hash once the node accepted it into
 // its mempool. Use Client.WaitTx for inclusion.
 func (c CLI) Broadcast(ctx context.Context, from string, args ...string) (string, error) {
-	out, err := c.run(ctx, append(append([]string{"tx"}, args...), c.TxFlags(from)...)...)
+	flags := c.TxFlags(from)
+	var defaults []string
+	for i := 0; i < len(flags); i++ {
+		name := flags[i]
+		if (name == "--gas" || name == "--gas-adjustment" || name == "--gas-prices") && hasFlag(args, name) {
+			i++
+			continue
+		}
+		if name == "--gas-prices" && hasFlag(args, "--fees") {
+			i++
+			continue
+		}
+		defaults = append(defaults, flags[i])
+	}
+	out, err := c.run(ctx, append(append([]string{"tx"}, args...), defaults...)...)
 	if err != nil {
 		return "", err
 	}

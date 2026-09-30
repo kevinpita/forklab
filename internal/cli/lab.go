@@ -35,7 +35,7 @@ func newLabCmd(a *app) *cobra.Command {
 		Use:   "lab",
 		Short: "Create, run, reset, and delete labs",
 	}
-	cmd.AddCommand(newLabCreateCmd(a), newLabListCmd(a), newLabShowCmd(a), newLabUpCmd(a), newLabDownCmd(a), newLabResetCmd(a), newLabDeleteCmd(a))
+	cmd.AddCommand(newLabCreateCmd(a), newLabListCmd(a), newLabShowCmd(a), newLabUpCmd(a), newLabDownCmd(a), newLabResetCmd(a), newLabDeleteCmd(a), newLabPauseCmd(a), newLabResumeCmd(a))
 	return cmd
 }
 

@@ -14,18 +14,20 @@ import (
 
 	"github.com/kevinpita/forklab/internal/chain"
 	"github.com/kevinpita/forklab/internal/cli/output"
+	"github.com/kevinpita/forklab/internal/control"
 	"github.com/spf13/cobra"
 )
 
 type nodeState struct {
-	Name       string     `json:"name"`
-	RPCPort    int        `json:"rpc_port"`
-	Up         bool       `json:"up"`
-	Error      string     `json:"error,omitempty"`
-	Height     int64      `json:"height,omitempty"`
-	BlockTime  *time.Time `json:"block_time,omitempty"`
-	CatchingUp bool       `json:"catching_up"`
-	Peers      int        `json:"peers"`
+	Name            string     `json:"name"`
+	RPCPort         int        `json:"rpc_port"`
+	Up              bool       `json:"up"`
+	Error           string     `json:"error,omitempty"`
+	CommittedHeight int64      `json:"committed_height,omitempty"`
+	Height          int64      `json:"height,omitempty"`
+	BlockTime       *time.Time `json:"block_time,omitempty"`
+	CatchingUp      bool       `json:"catching_up"`
+	Peers           int        `json:"peers"`
 }
 
 type validatorRow struct {
@@ -42,8 +44,9 @@ type validatorRow struct {
 }
 
 type statusView struct {
-	Lab     string `json:"lab"`
-	ChainID string `json:"chain_id"`
+	Pause   *pauseView `json:"pause,omitempty"`
+	Lab     string     `json:"lab"`
+	ChainID string     `json:"chain_id"`
 	// Height is the highest height any node reports.
 	Height int64 `json:"height"`
 	// AvgBlockTime is over the last 10 blocks, empty when too few exist.
@@ -60,6 +63,9 @@ func (v statusView) WriteHuman(w io.Writer) error {
 		_, _ = fmt.Fprintf(w, ", avg block time %s", v.AvgBlockTime)
 	}
 	_, _ = fmt.Fprintln(w)
+	if v.Pause != nil {
+		_, _ = fmt.Fprintf(w, "pause: %s, target committed height %d (Comet block store may be ahead)\n", v.Pause.Phase, v.Pause.Height)
+	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "NODE\tRPC\tSTATE\tHEIGHT\tBLOCK TIME\tCATCHING UP\tPEERS")
 	for _, n := range v.Nodes {
@@ -119,7 +125,7 @@ func newStatusCmd(a *app) *cobra.Command {
 				for i, n := range v.Nodes {
 					heights[i] = strconv.FormatInt(n.Height, 10)
 				}
-				return v, strings.Join(heights, ","), err
+				return v, strings.Join(heights, ",") + fmt.Sprint(v.Pause), err
 			})
 		},
 	}
@@ -134,6 +140,13 @@ func newStatusCmd(a *app) *cobra.Command {
 // with no node up is an error.
 func (e labEnv) status(ctx context.Context) (statusView, error) {
 	v := statusView{Lab: e.cfg.Name, ChainID: e.cfg.ChainID, Nodes: []nodeState{}, Validators: []validatorRow{}}
+	paused, err := control.Load(e.dir)
+	if err != nil {
+		return v, err
+	}
+	if paused != nil {
+		v.Pause = &pauseView{Height: paused.Height, Phase: paused.Phase}
+	}
 	live := -1
 	var errs []error
 	for i, n := range e.cfg.Nodes {
@@ -146,6 +159,11 @@ func (e labEnv) status(ctx context.Context) (statusView, error) {
 			continue
 		}
 		ns.Up, ns.Height, ns.CatchingUp = true, st.LatestHeight, st.CatchingUp
+		if paused != nil {
+			if info, err := e.clients[i].AppInfo(ctx); err == nil {
+				ns.CommittedHeight = info.Height
+			}
+		}
 		ns.BlockTime = &st.LatestBlockTime
 		if ni, err := e.clients[i].NetInfo(ctx); err == nil {
 			ns.Peers = len(ni.Peers)

@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -219,7 +220,7 @@ func (s *supervisor) handle(req Request) (resp Response, quit bool) {
 	var err error
 	switch req.Op {
 	case OpStatus:
-	case OpStart, OpStop, OpKill, OpRestart:
+	case OpStart, OpStop, OpKill, OpRestart, OpConfigure:
 		err = s.each(req)
 	case OpDown:
 		s.closing.Store(true)
@@ -299,6 +300,24 @@ func (s *supervisor) apply(n *node, req Request, timeout time.Duration) error {
 		return n.signal(syscall.SIGKILL, killTimeout)
 	case OpRestart:
 		return s.restart(n, req.Binary, req.Version, timeout)
+	case OpConfigure:
+		if n.running() != nil {
+			return fmt.Errorf("node %d must be stopped before configuring arguments", n.spec.Index)
+		}
+		if !slices.Contains(req.Args, n.currentSpec().Home) {
+			return fmt.Errorf("node %d arguments must contain its home", n.spec.Index)
+		}
+		n.mu.Lock()
+		previous := n.spec.Args
+		n.spec.Args = slices.Clone(req.Args)
+		n.mu.Unlock()
+		if err := s.saveNodes(); err != nil {
+			n.mu.Lock()
+			n.spec.Args = previous
+			n.mu.Unlock()
+			return err
+		}
+		return nil
 	}
 	return fmt.Errorf("unknown op %q", req.Op)
 }

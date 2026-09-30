@@ -16,6 +16,8 @@ const (
 	OpStop    Op = "stop"
 	OpKill    Op = "kill"
 	OpRestart Op = "restart"
+	// OpConfigure changes the arguments of a stopped node, persisted for adoption.
+	OpConfigure Op = "configure"
 	// OpDown stops every node (killing any that ignore SIGTERM), then the
 	// supervisor exits.
 	OpDown Op = "down"
@@ -43,6 +45,7 @@ type Request struct {
 	Version string        `json:"version,omitempty"`
 	Timeout time.Duration `json:"timeout_ns,omitempty"`
 	Upgrade *Upgrade      `json:"upgrade,omitempty"`
+	Args    []string      `json:"args,omitempty"`
 }
 
 // Response carries every node's status, the pending upgrade, and the last

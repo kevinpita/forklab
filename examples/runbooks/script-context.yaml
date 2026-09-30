@@ -1,0 +1,14 @@
+version: 1
+name: script-context
+steps:
+  - id: check
+    script:
+      - python3
+      - -c
+      - |-
+        import json, sys
+        context = json.load(sys.stdin)
+        print(json.dumps({"chain_id": context["chain_id"], "checked": True}))
+  - assert: >-
+      .steps.check.exit_code == 0 and .steps.check.json.checked == true and
+      .steps.check.json.chain_id == .chain_id

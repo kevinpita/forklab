@@ -1,0 +1,16 @@
+version: 1
+name: pause-inspect
+steps:
+  - id: frozen
+    pause: 20
+    timeout: 2m
+  - id: supply
+    query: [bank, total]
+  - id: raw
+    store:
+      name: bank
+      key_hex: "00"
+  - assert: '.steps.frozen.height == 20 and .steps.raw.height == 20'
+  - hold: true
+  - id: after_manual_resume
+    query: [bank, total]

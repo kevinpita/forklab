@@ -52,7 +52,13 @@ type validatorInfo struct {
 	Tokens       string  `json:"tokens"`
 }
 
+type pauseStatus struct {
+	Height int64  `json:"height"`
+	Phase  string `json:"phase"`
+}
+
 type labStatus struct {
+	Pause        *pauseStatus    `json:"pause"`
 	Lab          string          `json:"lab"`
 	ChainID      string          `json:"chain_id"`
 	Height       int64           `json:"height"`

@@ -382,3 +382,23 @@ func TestWaitTxFailedInBlock(t *testing.T) {
 		t.Errorf("err = %v, want a TxError with code 11", err)
 	}
 }
+
+func TestBroadcastHonorsExplicitGasAndFees(t *testing.T) {
+	for _, input := range [][]string{{"--gas", "200000", "--fees", "10stake"}, {"--gas=200000", "--gas-prices=1stake", "--gas-adjustment=1.2"}} {
+		bin, file := fakeBinary(t, cliFixture(t, "simd", "broadcast.json"), 0)
+		if _, err := testCLI(bin).Broadcast(context.Background(), "val0", append([]string{"bank", "send", "val0", "addr", "1stake"}, input...)...); err != nil {
+			t.Fatal(err)
+		}
+		args := recordedArgs(t, file)
+		for _, unwanted := range []string{"auto", "0.025stake"} {
+			for _, arg := range args {
+				if arg == unwanted {
+					t.Fatalf("defaults override explicit gas or fees: %q", args)
+				}
+			}
+		}
+		if !strings.Contains(strings.Join(args, " "), "--yes --output json") {
+			t.Fatalf("missing unary flag or output: %q", args)
+		}
+	}
+}

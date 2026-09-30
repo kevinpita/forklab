@@ -57,6 +57,24 @@ const (
 	actStartLab
 	actVersion
 	actExec
+	actRunbook
+	actRunbookValidate
+	actRecipeEditor
+	actRecipeOpen
+	actRecipeUp
+	actRecipeDown
+	actRecipeAdd
+	actRecipeEdit
+	actRecipeRemove
+	actRecipeMoveUp
+	actRecipeMoveDown
+	actRecipeVariable
+	actRecipeSave
+	actRecipeRun
+	actRunbookShow
+	actPause
+	actResume
+	actStore
 	actLabNew
 	actLabReset
 	actLabDelete
@@ -101,11 +119,12 @@ const (
 	scopePreview
 	scopeConfirm
 	scopeForm
+	scopeRecipe
 )
 
 var scopeTitles = map[scope]string{
 	scopeGlobal: "Global", scopeList: "Panel list", scopeMain: "Main pane", scopeHelp: "Help", scopePalette: "Palette",
-	scopePreview: "Command preview", scopeConfirm: "Confirm", scopeForm: "Form",
+	scopePreview: "Command preview", scopeConfirm: "Confirm", scopeForm: "Form", scopeRecipe: "Runbook builder",
 }
 
 type binding struct {
@@ -212,6 +231,15 @@ var catalog = []binding{
 		opens(func(m *Model) *formSpec { return labCreateSpec(m, true) }),
 	bind(actStartLab, scopeGlobal, "Start the lab", "u").foot(6, "start lab").onlyIf(labIdle).
 		runs(labCmd("up"), "", false),
+	bind(actRecipeEditor, scopeGlobal, "Open the runbook builder", "ctrl+e").pal(),
+	bind(actRunbook, scopeGlobal, "Run a runbook", "ctrl+t").onlyIf(hasLab).opens(recipeSpec("run")),
+	bind(actRunbookShow, scopeGlobal, "Show a runbook", "ctrl+o").opens(recipeSpec("show")),
+	bind(actRunbookValidate, scopeGlobal, "Validate a runbook", "ctrl+v").opens(recipeSpec("validate")),
+	bind(actPause, scopeGlobal, "Pause at a committed height", "ctrl+p").onlyIf(hasLab).opens(pauseSpec),
+	bind(actResume, scopeGlobal, "Resume a paused chain", "ctrl+s").onlyIf(hasLab).runs(func(m *Model) Command {
+		return Command{"lab", "resume", func() string { l, _ := m.selectedLab(); return l.Name }()}
+	}, "", false),
+	bind(actStore, scopeGlobal, "Inspect raw store bytes", "ctrl+b").onlyIf(chainUp).opens(storeSpec),
 	bind(actExec, scopeGlobal, "Run a chain binary command", "x").onlyIf(chainUp).opens(execSpec),
 	bind(actVersion, scopeGlobal, "Show the forklab version", "V").runs(func(*Model) Command { return Command{"version"} }, "", false).shows(),
 	bind(actNextPanel, scopeGlobal, "Next panel", "tab"),
@@ -274,6 +302,23 @@ var catalog = []binding{
 
 	bind(actBinaryFetch, scopeBinaries, "Fetch a binary", "f").foot(10, "fetch").opens(binarySpec("fetch")),
 	bind(actBinaryBuild, scopeBinaries, "Build a binary from source", "b").foot(11, "build").opens(binarySpec("build")),
+
+	bind(actRecipeAdd, scopeRecipe, "Add a step", "a").foot(10, "add").onlyIf(recipeIdle).
+		opens(func(m *Model) *formSpec { return m.recipeStepSpec(-1) }),
+	bind(actRecipeEdit, scopeRecipe, "Edit the selected step", "e", "enter").foot(11, "edit").onlyIf(recipeHasStep).
+		opens(func(m *Model) *formSpec { return m.recipeStepSpec(m.recipe.Cursor) }),
+	bind(actRecipeRemove, scopeRecipe, "Remove the selected step", "d").foot(12, "remove").onlyIf(recipeHasStep),
+	bind(actRecipeMoveUp, scopeRecipe, "Move the selected step up", "K").foot(13, "reorder").shown("J/K").onlyIf(recipeHasStep),
+	bind(actRecipeMoveDown, scopeRecipe, "Move the selected step down", "J").onlyIf(recipeHasStep),
+	bind(actRecipeUp, scopeRecipe, "Select the previous step", "k", "up").onlyIf(recipeHasStep),
+	bind(actRecipeDown, scopeRecipe, "Select the next step", "j", "down").onlyIf(recipeHasStep),
+	bind(actRecipeVariable, scopeRecipe, "Add or update a variable", "v").foot(14, "variable").onlyIf(recipeIdle).
+		opens(func(m *Model) *formSpec { return m.recipeVariableSpec() }),
+	bind(actRecipeSave, scopeRecipe, "Save the runbook", "s").foot(15, "save").onlyIf(recipeIdle),
+	bind(actRecipeRun, scopeRecipe, "Run the saved runbook", "r").foot(16, "run").onlyIf(recipeIdle),
+	bind(actRecipeOpen, scopeRecipe, "Create or load another runbook", "o").foot(17, "open").onlyIf(recipeIdle).opens(recipeEditorSpec),
+	bind(actClose, scopeRecipe, "Close and keep the draft", "esc", "ctrl+c").foot(20, "close"),
+	bind(actHelp, scopeRecipe, "Help for the runbook builder", "?").foot(80, "help"),
 
 	bind(actClose, scopeHelp, "Close", "esc", "?", "q", "ctrl+c").foot(10, "close"),
 	bind(actUp, scopeHelp, "Scroll up", "k", "up"),
@@ -419,6 +464,8 @@ func (m *Model) scopesWith(o overlayKind) []scope {
 		return []scope{scopeConfirm}
 	case overlayForm:
 		return []scope{scopeForm}
+	case overlayRecipe:
+		return []scope{scopeRecipe}
 	}
 	var out []scope
 	if s, ok := panels[m.panel].scope(); ok {
@@ -475,11 +522,14 @@ func (m *Model) footerBindings() []binding {
 // helpGroups lists the bindings of the scopes that apply to the focused
 // panel, most specific first, with each binding's enabled state.
 func (m *Model) helpGroups() []helpGroup {
-	scopes := []scope{}
-	if s, ok := panels[m.panel].scope(); ok {
-		scopes = append(scopes, s)
+	scopes := []scope{scopeRecipe}
+	if m.overlay != overlayRecipe && (m.overlay != overlayHelp || m.helpFrom != overlayRecipe) {
+		scopes = nil
+		if s, ok := panels[m.panel].scope(); ok {
+			scopes = append(scopes, s)
+		}
+		scopes = append(scopes, scopeList, scopeMain, scopeGlobal)
 	}
-	scopes = append(scopes, scopeList, scopeMain, scopeGlobal)
 	var groups []helpGroup
 	for _, sc := range scopes {
 		g := helpGroup{title: scopeTitles[sc]}
@@ -578,43 +628,51 @@ var handlers map[action]func(*Model) tea.Cmd
 
 func init() {
 	handlers = map[action]func(*Model) tea.Cmd{
-		actQuit:        (*Model).quit,
-		actHelp:        func(m *Model) tea.Cmd { m.openOverlay(overlayHelp); return nil },
-		actPalette:     func(m *Model) tea.Cmd { m.openPalette(""); return nil },
-		actCommandLine: func(m *Model) tea.Cmd { m.openPalette("forklab "); return nil },
-		actPreview:     func(m *Model) tea.Cmd { m.openOverlay(overlayPreview); return nil },
-		actRefresh:     (*Model).refresh,
-		actTheme:       func(m *Model) tea.Cmd { m.th = nextTheme(m.th); return nil },
-		actGoNodes:     goPanel(panelNodes),
-		actGoConsensus: goPanel(panelConsensus),
-		actGoProposals: goPanel(panelProposals),
-		actGoUpgrades:  goPanel(panelUpgrades),
-		actGoAccounts:  goPanel(panelAccounts),
-		actGoLabs:      goPanel(panelLabs),
-		actGoProfiles:  goPanel(panelProfiles),
-		actGoBinaries:  goPanel(panelBinaries),
-		actNextPanel:   func(m *Model) tea.Cmd { return m.setPanel((m.panel + 1) % numPanels) },
-		actPrevPanel:   func(m *Model) tea.Cmd { return m.setPanel((m.panel + numPanels - 1) % numPanels) },
-		actFocusMain:   func(m *Model) tea.Cmd { m.focus = focusMain; return nil },
-		actFocusList:   (*Model).back,
-		actUp:          func(m *Model) tea.Cmd { return m.move(-1) },
-		actDown:        func(m *Model) tea.Cmd { return m.move(1) },
-		actTop:         func(m *Model) tea.Cmd { return m.move(-1 << 30) },
-		actBottom:      func(m *Model) tea.Cmd { return m.move(1 << 30) },
-		actPageUp:      func(m *Model) tea.Cmd { return m.move(-m.pageSize()) },
-		actPageDown:    func(m *Model) tea.Cmd { return m.move(m.pageSize()) },
-		actFollow:      (*Model).toggleFollow,
-		actWrap:        func(m *Model) tea.Cmd { m.logs.wrap = !m.logs.wrap; return nil },
-		actClose:       (*Model).closeOverlay,
-		actConfirm:     (*Model).confirmRun,
-		actOverlayUp:   func(m *Model) tea.Cmd { m.overlayMove(-1); return nil },
-		actOverlayDown: func(m *Model) tea.Cmd { m.overlayMove(1); return nil },
-		actRun:         (*Model).overlayRun,
-		actFormSubmit:  (*Model).formSubmit,
-		actFormNext:    func(m *Model) tea.Cmd { m.form.move(1); return m.syncForm() },
-		actFormPrev:    func(m *Model) tea.Cmd { m.form.back(); return m.syncForm() },
-		actFormLeft:    func(m *Model) tea.Cmd { return m.formCycle(-1) },
-		actFormRight:   func(m *Model) tea.Cmd { return m.formCycle(1) },
+		actQuit:           (*Model).quit,
+		actHelp:           (*Model).openHelp,
+		actPalette:        func(m *Model) tea.Cmd { m.openPalette(""); return nil },
+		actCommandLine:    func(m *Model) tea.Cmd { m.openPalette("forklab "); return nil },
+		actPreview:        func(m *Model) tea.Cmd { m.openOverlay(overlayPreview); return nil },
+		actRefresh:        (*Model).refresh,
+		actTheme:          func(m *Model) tea.Cmd { m.th = nextTheme(m.th); return nil },
+		actGoNodes:        goPanel(panelNodes),
+		actGoConsensus:    goPanel(panelConsensus),
+		actGoProposals:    goPanel(panelProposals),
+		actGoUpgrades:     goPanel(panelUpgrades),
+		actGoAccounts:     goPanel(panelAccounts),
+		actGoLabs:         goPanel(panelLabs),
+		actGoProfiles:     goPanel(panelProfiles),
+		actGoBinaries:     goPanel(panelBinaries),
+		actNextPanel:      func(m *Model) tea.Cmd { return m.setPanel((m.panel + 1) % numPanels) },
+		actPrevPanel:      func(m *Model) tea.Cmd { return m.setPanel((m.panel + numPanels - 1) % numPanels) },
+		actFocusMain:      func(m *Model) tea.Cmd { m.focus = focusMain; return nil },
+		actFocusList:      (*Model).back,
+		actUp:             func(m *Model) tea.Cmd { return m.move(-1) },
+		actDown:           func(m *Model) tea.Cmd { return m.move(1) },
+		actTop:            func(m *Model) tea.Cmd { return m.move(-1 << 30) },
+		actBottom:         func(m *Model) tea.Cmd { return m.move(1 << 30) },
+		actPageUp:         func(m *Model) tea.Cmd { return m.move(-m.pageSize()) },
+		actPageDown:       func(m *Model) tea.Cmd { return m.move(m.pageSize()) },
+		actFollow:         (*Model).toggleFollow,
+		actWrap:           func(m *Model) tea.Cmd { m.logs.wrap = !m.logs.wrap; return nil },
+		actClose:          (*Model).closeOverlay,
+		actConfirm:        (*Model).confirmRun,
+		actOverlayUp:      func(m *Model) tea.Cmd { m.overlayMove(-1); return nil },
+		actOverlayDown:    func(m *Model) tea.Cmd { m.overlayMove(1); return nil },
+		actRun:            (*Model).overlayRun,
+		actRecipeEditor:   (*Model).openRecipeEditor,
+		actRecipeUp:       func(m *Model) tea.Cmd { m.recipe.move(-1); return nil },
+		actRecipeDown:     func(m *Model) tea.Cmd { m.recipe.move(1); return nil },
+		actRecipeRemove:   func(m *Model) tea.Cmd { m.recipe.remove(); return nil },
+		actRecipeMoveUp:   func(m *Model) tea.Cmd { m.recipe.reorder(-1); return nil },
+		actRecipeMoveDown: func(m *Model) tea.Cmd { m.recipe.reorder(1); return nil },
+		actRecipeSave:     (*Model).saveRecipe,
+		actRecipeRun:      (*Model).runRecipe,
+		actFormSubmit:     (*Model).formSubmit,
+		actFormNext:       func(m *Model) tea.Cmd { m.form.move(1); return m.syncForm() },
+		actFormPrev:       func(m *Model) tea.Cmd { m.form.back(); return m.syncForm() },
+		actFormLeft:       func(m *Model) tea.Cmd { return m.formCycle(-1) },
+		actFormRight:      func(m *Model) tea.Cmd { return m.formCycle(1) },
 	}
 }
 

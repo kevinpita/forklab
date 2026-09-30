@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kevinpita/forklab/internal/control"
 	"github.com/kevinpita/forklab/internal/supervisor"
 )
 
@@ -29,6 +30,9 @@ const (
 func Reset(ctx context.Context, dir, binary string) ([]ResetMethod, error) {
 	c, err := Load(dir)
 	if err != nil {
+		return nil, err
+	}
+	if err := control.Clear(dir); err != nil {
 		return nil, err
 	}
 	specs, err := supervisor.LoadNodes(dir)

@@ -680,3 +680,34 @@ func execSpec(*Model) *formSpec {
 		},
 	}
 }
+
+func recipeSpec(action string) func(*Model) *formSpec {
+	return func(*Model) *formSpec {
+		return &formSpec{title: action + " runbook", show: true, fields: []fieldSpec{
+			{key: "file", label: "YAML file", kind: fieldText, placeholder: "./my-test.yaml"},
+		}, build: func(v values) Command { return Command{"runbook", action, v["file"]} }}
+	}
+}
+
+func pauseSpec(m *Model) *formSpec {
+	l, _ := m.selectedLab()
+	return &formSpec{title: "Pause at exact height", fields: []fieldSpec{{key: "height", label: "Committed H", kind: fieldNumber, hint: "the halt barrier keeps query APIs available"}}, build: func(v values) Command { return Command{"lab", "pause", l.Name, "--height", v["height"]} }}
+}
+
+func storeSpec(*Model) *formSpec {
+	return &formSpec{title: "Inspect raw store", show: true, fields: []fieldSpec{
+		{key: "module", label: "Module store", kind: fieldText, def: "bank"},
+		{key: "key", label: "Key (hex)", kind: fieldText, placeholder: "00"},
+		{key: "height", label: "State height", kind: fieldNumber, optional: true, hint: "empty means latest"},
+		{key: "prefix", label: "Prefix query", kind: fieldToggle, hint: "only when this chain supports ABCI subspace queries"},
+	}, build: func(v values) Command {
+		c := Command{"store", v["module"], v["key"]}
+		if v["height"] != "" {
+			c = append(c, "--height", v["height"])
+		}
+		if v["prefix"] == "true" {
+			c = append(c, "--prefix")
+		}
+		return c
+	}}
+}

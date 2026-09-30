@@ -29,7 +29,11 @@ func labStates(t *testing.T) []*Model {
 	none := emptyModel(t)
 	none.wizardOffered = true
 	feedLabs(t, none, `[]`)
-	return []*Model{running, exited, planned, stopped, none}
+	builder := loadedModel(t, buildTheme("ansi", true))
+	press(builder, "ctrl+e")
+	fill(builder.form, map[string]string{"path": "./case.yaml"})
+	_ = builder.formSubmit()
+	return []*Model{running, exited, planned, stopped, none, builder}
 }
 
 // offered is every command the TUI can run or show: each binding's command

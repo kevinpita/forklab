@@ -104,6 +104,9 @@ func newLabUpCmd(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := requireUnpaused(dir); err != nil {
+				return err
+			}
 			sup, err := ensureSupervisor(cmd.Context(), dir)
 			if err != nil {
 				return err
