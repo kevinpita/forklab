@@ -3,5 +3,5 @@ devenv.local.nix
 .direnv
 /bin/
 .claude/
-docs/
+docs/specs/
 /dist/
