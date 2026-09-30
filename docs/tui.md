@@ -41,6 +41,7 @@ Press `?` for the keys of the focused panel.
 | Panel | Keys |
 |-------|------|
 | Any | `1`-`8` jump to a panel, `Tab`/`Shift+Tab` next or previous panel, `Ctrl+K` palette, `:` run a command, `c` command preview, `x` exec, `Ctrl+R` refresh, `T` next theme, `V` version, `?` help, `q` quit |
+| Runbooks and inspection | `Ctrl+E` create or edit, `Ctrl+T` run, `Ctrl+V` validate, `Ctrl+O` show, `Ctrl+P` pause, `Ctrl+S` resume, `Ctrl+B` read raw store bytes |
 | Panel list | `j`/`k` move, `g`/`G` first or last, `Enter` focus the main pane |
 | Main pane | `j`/`k` scroll, `PgUp`/`PgDn` page, `g`/`G` top or bottom, `Esc` back to the list |
 | Nodes | `s` stop, `S` start, `K` kill, `r` restart, `R` restart on a version, `l` follow logs, `w` wrap |
@@ -63,6 +64,36 @@ the background.
 This is `u` on the Upgrades panel:
 
 ![The upgrade schedule form with its command line](../.github/assets/upgrade-form.png)
+
+## Create a runbook
+
+Press `Ctrl+E`, enter a YAML path, and choose **Create new** or **Edit existing**.
+The builder lists the recipe's steps and opens a form for each action.
+
+| Builder key | Action |
+|-------------|--------|
+| `j` / `k` | Select a step |
+| `a` | Add a step |
+| `e` or `Enter` | Edit the selected step |
+| `d` | Remove the selected step |
+| `J` / `K` | Move the selected step down or up |
+| `v` | Add or update a variable |
+| `s` | Validate and save the YAML |
+| `r` | Run the saved recipe |
+| `Esc` | Close the builder |
+
+Choose a transaction, query, assertion, height wait, pause, manual hold,
+resume, raw store lookup, or local script. The form shows the fields for
+that action. Command arguments support quotes and Go templates, such as
+`bank balances '{{ .accounts.test0.address }}'`. The builder saves arguments
+as YAML lists without implicit shell parsing. Save changes before running.
+
+`Ctrl+T`, `Ctrl+V`, and `Ctrl+O` open file forms for run, validate, and show.
+`Ctrl+P` selects a committed height to pause the selected lab, `Ctrl+S`
+resumes it, and `Ctrl+B` opens a raw store form. A pause keeps query RPC
+available and remains until resume, including after a recipe error.
+See [Runbooks](runbooks.md) for supported SDK versions, timeout behavior,
+the YAML format, and examples.
 
 ## Command palette
 

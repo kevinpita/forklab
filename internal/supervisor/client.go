@@ -92,6 +92,12 @@ func (c *Client) Kill(sel string) ([]NodeStatus, error) {
 	return c.call(Request{Op: OpKill, Nodes: sel})
 }
 
+// Configure replaces the start arguments of stopped nodes. Home must remain
+// in the arguments so process adoption can still identify them.
+func (c *Client) Configure(sel string, args []string) ([]NodeStatus, error) {
+	return c.call(Request{Op: OpConfigure, Nodes: sel, Args: args})
+}
+
 // Restart stops then starts sel; a non-empty binary becomes the node's
 // binary from now on, and a non-empty version is recorded as the version
 // the node runs.

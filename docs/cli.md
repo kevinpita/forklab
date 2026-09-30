@@ -46,6 +46,8 @@ directory). Without it they use the running lab, or the only lab on disk.
 | `lab show <name>` | Show nodes, ports, and keys (`--show-mnemonics` for mnemonics) |
 | `lab up <name>` | Start the supervisor and nodes and wait for blocks |
 | `lab down <name>` | Stop the nodes and the supervisor |
+| `lab pause <name> --height <H>` | Freeze at committed application height H while keeping query RPC available |
+| `lab resume <name>` | Restore normal node arguments and verify commits resume |
 | `lab reset <name>` | Wipe chain data and replay from genesis (`--force` stops the lab first) |
 | `lab delete <name>` | Delete a stopped lab |
 | `node list` | Show each node's state, pid, uptime, and binary |
@@ -66,11 +68,18 @@ directory). Without it they use the running lab, or the only lab on disk.
 | `upgrade cancel` | Cancel the scheduled upgrade through governance |
 | `upgrade status` | Show the plan and each node's version and swap state |
 | `exec -- <bin args>` | Run the chain binary with the lab's home, node, chain id, and keyring |
+| `runbook validate <file.yaml>` | Validate a YAML recipe without contacting a chain |
+| `runbook show <file.yaml>` | Print a validated recipe as YAML or JSON |
+| `runbook write <file.yaml> --document '<json>'` | Validate and save a recipe as YAML, with `--force` to overwrite |
+| `runbook run <file.yaml>` | Execute steps in order and save a report, including on execution failure |
+| `store <module> <hex-key>` | Inspect raw store bytes, with optional `--height` or `--prefix` |
 | `tui` | Open the terminal UI, the same as `forklab` with no command |
 | `version` | Print the forklab version |
 
 Run `forklab <command> --help` for every flag. [Upgrades](upgrades.md) and
 [Fork mode](fork-mode.md) cover `upgrade` and `lab create --fork` in depth.
+[Runbooks](runbooks.md) covers YAML recipes, templates, exact-height pause,
+manual resume, and raw store inspection.
 
 ## Scripts and agents
 

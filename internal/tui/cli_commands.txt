@@ -13,7 +13,9 @@ lab create
 lab delete
 lab down
 lab list
+lab pause
 lab reset
+lab resume
 lab show
 lab up
 node kill
@@ -28,7 +30,12 @@ profile edit
 profile list
 profile show
 profile validate
+runbook run
+runbook show
+runbook validate
+runbook write
 status
+store
 tui
 upgrade cancel
 upgrade schedule

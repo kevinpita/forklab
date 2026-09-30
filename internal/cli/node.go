@@ -95,6 +95,9 @@ func newNodeStartCmd(a *app, labDir *string) *cobra.Command {
 		Short: "Start a node, or all of them",
 		Args:  nodeArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireUnpaused(*labDir); err != nil {
+				return err
+			}
 			c, err := ensureSupervisor(cmd.Context(), *labDir)
 			if err != nil {
 				return err
@@ -157,6 +160,9 @@ func newNodeRestartCmd(a *app, labDir *string) *cobra.Command {
 		Short: "Stop a node and start it again, optionally with another binary",
 		Args:  nodeArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireUnpaused(*labDir); err != nil {
+				return err
+			}
 			path, version, err := restartBinary(cmd.Context(), a, cmd.ErrOrStderr(), *labDir, binary, version)
 			if err != nil {
 				return err

@@ -50,9 +50,12 @@ type fieldSpec struct {
 type values map[string]string
 
 type formSpec struct {
-	title  string
-	fields []fieldSpec
-	build  func(v values) Command
+	title string
+	// submit handles local draft editing; only saving calls the CLI.
+	submit   func(values) tea.Cmd
+	returnTo overlayKind
+	fields   []fieldSpec
+	build    func(v values) Command
 	// stepped shows one field at a time and a review step before running.
 	stepped bool
 	// show puts the result in the main pane.
@@ -495,6 +498,9 @@ func (m *Model) formSubmit() tea.Cmd {
 		}
 		return nil
 	}
+	if f.spec.submit != nil {
+		return f.spec.submit(f.values())
+	}
 	c := f.command()
 	f.running, f.started, f.err = c, time.Now(), nil
 	return m.exec(c, f.spec.show)
@@ -504,6 +510,9 @@ func (m *Model) formSubmit() tea.Cmd {
 // background and reports in the status line.
 func (m *Model) closeForm() tea.Cmd {
 	m.overlay = overlayNone
+	if m.form != nil {
+		m.overlay = m.form.spec.returnTo
+	}
 	if m.form != nil && m.form.running == nil {
 		m.form = nil
 	}

@@ -227,13 +227,21 @@ func decodeLine(line []byte, v any) error {
 // double quotes.
 func splitArgs(s string) ([]string, error) {
 	var (
-		args  []string
-		cur   strings.Builder
-		quote rune
-		inArg bool
+		args    []string
+		cur     strings.Builder
+		quote   rune
+		inArg   bool
+		escaped bool
 	)
 	for _, r := range s {
 		switch {
+		case escaped:
+			cur.WriteRune(r)
+			escaped = false
+			inArg = true
+		case r == '\\' && quote != '\'':
+			escaped = true
+			inArg = true
 		case quote != 0 && r == quote:
 			quote = 0
 		case quote != 0:
@@ -250,6 +258,9 @@ func splitArgs(s string) ([]string, error) {
 			cur.WriteRune(r)
 			inArg = true
 		}
+	}
+	if escaped {
+		return nil, errors.New("unfinished escape")
 	}
 	if quote != 0 {
 		return nil, errors.New("unterminated quote")

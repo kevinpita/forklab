@@ -1,0 +1,34 @@
+version: 1
+name: bank-transfer
+vars:
+  amount: "1000"
+steps:
+  - id: before
+    query: [bank, balances, "{{ .accounts.test1.address }}"]
+  - id: send
+    tx:
+      from: test0
+      args:
+        - bank
+        - send
+        - "{{ .accounts.test0.address }}"
+        - "{{ .accounts.test1.address }}"
+        - "{{ .vars.amount }}{{ .fee_denom }}"
+  - id: return_send
+    tx:
+      from: test1
+      args:
+        - bank
+        - send
+        - "{{ .accounts.test1.address }}"
+        - "{{ .accounts.test0.address }}"
+        - "{{ .vars.amount }}{{ .fee_denom }}"
+  - assert: >-
+      .steps.send.code == 0 and .steps.send.height > 0 and
+      .steps.return_send.code == 0 and
+      .steps.return_send.height >= .steps.send.height
+  - id: after
+    query: [bank, balances, "{{ .accounts.test1.address }}"]
+  - assert: >-
+      .fee_denom as $denom |
+      any(.steps.after.balances[]; .denom == $denom)

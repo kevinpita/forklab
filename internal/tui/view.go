@@ -52,6 +52,8 @@ func (m *Model) render() string {
 		body = overlay(body, m.confirmView(), m.w)
 	case overlayForm:
 		body = overlay(body, m.formView(), m.w)
+	case overlayRecipe:
+		body = overlay(body, m.recipeView(), m.w)
 	}
 	lines = append(lines, body...)
 	lines = append(lines, m.statusLine(), m.footer())
@@ -125,6 +127,9 @@ func (m *Model) header() string {
 	}
 	if v := m.versions(); v != "" {
 		chips = append(chips, chip{kv(th, "bin", th.Text.Render(v)), 6})
+	}
+	if s.Pause != nil {
+		chips = append(chips, chip{th.Warn.Render(fmt.Sprintf("%s at H=%d", s.Pause.Phase, s.Pause.Height)), 1})
 	}
 	if p := m.plan(); p != nil {
 		chips = append(chips, chip{th.Warn.Render(fmt.Sprintf("⬆ %s @ %d %s", p.Name, p.Height, m.blocksLeft(p.Height))), 2})
@@ -606,7 +611,11 @@ func (m *Model) helpRoom() int { return max(m.bodyH()-2, 1) }
 func (m *Model) helpView() []string {
 	lines := m.helpLines()
 	off := min(m.helpOff, max(len(lines)-m.helpRoom(), 0))
-	return m.modal("Help · "+panels[m.panel].title, "j/k scroll · esc close", lines[off:], 64)
+	title := panels[m.panel].title
+	if m.helpFrom == overlayRecipe {
+		title = scopeTitles[scopeRecipe]
+	}
+	return m.modal("Help · "+title, "j/k scroll · esc close", lines[off:], 64)
 }
 
 // clampScroll keeps the main pane and help offsets inside their content,

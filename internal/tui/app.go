@@ -32,6 +32,7 @@ const (
 	overlayPreview
 	overlayConfirm
 	overlayForm
+	overlayRecipe
 )
 
 // loadKind names one polled query. Each has its own sequence so a slow
@@ -88,11 +89,13 @@ type Model struct {
 	cursor   [numPanels]int
 	scroll   int // main pane scroll for detail views
 	helpOff  int
+	helpFrom overlayKind
 	palette  paletteState
 	input    textinput.Model
 	preview  int
 	pending  *pendingRun
 	form     *form
+	recipe   *recipeEditor
 	formSeq  int
 	quitting bool
 	spinning bool
@@ -295,7 +298,17 @@ func (m *Model) closeOverlay() tea.Cmd {
 	if m.overlay == overlayForm {
 		return m.closeForm()
 	}
-	m.overlay = overlayNone
+	if m.overlay == overlayHelp {
+		m.overlay, m.helpFrom = m.helpFrom, overlayNone
+	} else {
+		m.overlay = overlayNone
+	}
+	return nil
+}
+
+func (m *Model) openHelp() tea.Cmd {
+	m.helpFrom = m.overlay
+	m.openOverlay(overlayHelp)
 	return nil
 }
 
@@ -488,6 +501,7 @@ func (m *Model) applyAction(msg actionMsg) tea.Cmd {
 	res := msg.res
 	m.last = &res
 	m.formDone(res)
+	m.recipeDone(res)
 	if m.quitting && len(m.running) == 0 {
 		return m.quit()
 	}

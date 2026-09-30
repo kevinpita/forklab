@@ -726,3 +726,60 @@ func TestNodeDyingWhileUnsupervisedIsReportedExited(t *testing.T) {
 		t.Errorf("start after the unsupervised exit: %+v, %v", nodes, err)
 	}
 }
+
+func TestConfigureRequiresStoppedNodeAndSurvivesAdoption(t *testing.T) {
+	h := newHarness(t)
+	l := h.lab(1)
+	c, err := supervisor.EnsureRunning(context.Background(), l.dir, testSpawner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Start(supervisor.All); err != nil {
+		t.Fatal(err)
+	}
+	args := append(slices.Clone(l.specs[0].Args), "--crash-code", "9")
+	if _, err := c.Configure("0", args); err == nil {
+		t.Fatal("configured a live node")
+	}
+	if _, err := c.Stop(supervisor.All, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Configure("0", []string{"fake-node"}); err == nil {
+		t.Fatal("home omitted")
+	}
+	if _, err := c.Configure("0", args); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Exit(); err != nil {
+		t.Fatal(err)
+	}
+	c, err = supervisor.EnsureRunning(context.Background(), l.dir, testSpawner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := c.Start("0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "configured node signal handler", func() bool {
+		return strings.Contains(logOf(l, 0), fmt.Sprintf("fake node %d starting", nodes[0].PID)) && strings.Contains(logOf(l, 0), "tick 0")
+	})
+	if err := syscall.Kill(nodes[0].PID, syscall.SIGUSR1); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		nodes, err = c.Status()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if nodes[0].ExitCode != nil {
+			if *nodes[0].ExitCode != 9 {
+				t.Fatalf("configured exit=%d", *nodes[0].ExitCode)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("configured node did not exit")
+}
