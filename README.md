@@ -59,9 +59,10 @@ forklab version
 ```
 
 > [!NOTE]
-> A `go install` build reports its version as `dev`. Profiles with `git` or
-> `src` binaries build the chain from source, so they need `git` and Go on the
-> machine.
+> A `go install` build reports its version as `dev`.
+
+Profiles with `git` or `src` binaries build the chain from source, so they need
+`git` and Go on the machine.
 
 ## Quick start
 

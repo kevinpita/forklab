@@ -39,7 +39,11 @@ When the nodes halt at the plan height, the supervisor restarts each one on
 the new binary, and `upgrade schedule` returns once blocks are produced past
 that height.
 
+Both nodes halt at the plan height:
+
 ![Upgrades panel with both nodes halted at v11.2.0](../.github/assets/upgrade-halt.png)
+
+The supervisor swaps them to the new binary and blocks continue:
 
 ![Upgrades panel with both nodes swapped to 11.2.0](../.github/assets/upgrade-swap.png)
 

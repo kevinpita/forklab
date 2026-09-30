@@ -28,7 +28,7 @@ Pushing a `v*` tag runs GoReleaser, which publishes the release archives.
 End-to-end tests run real chains and use the `e2e` build tag:
 
 ```sh
-go test -tags e2e ./internal/cli
+go test -tags e2e ./internal/cli ./internal/genesis
 ```
 
 Each test skips unless the environment variables it needs point at local
@@ -36,8 +36,8 @@ chain binaries or homes:
 
 | Variable | Used for |
 |----------|----------|
-| `FORKLAB_SIMD` | A `simd` v0.53.8 binary |
-| `FORKLAB_EXRPD` | An `exrpd` v11.1.1 binary |
+| `FORKLAB_SIMD` | A `simd` v0.53.8 binary (cli and genesis tests) |
+| `FORKLAB_EXRPD` | An `exrpd` v11.1.1 binary (cli and genesis tests) |
 | `FORKLAB_EXRPD_OLD`, `FORKLAB_EXRPD_NEW` | `exrpd` v11.1.1 and v11.2.0 binaries for the upgrade tests |
 | `FORKLAB_SIMD_MAINNET`, `FORKLAB_EXRPD_MAINNET` | A stopped node home (`data/` and `config/genesis.json`) that the fork tests pack into a snapshot |
 | `FORKLAB_RPC` | The CometBFT RPC of a live node, for `go test -tags e2e ./internal/chain` |
