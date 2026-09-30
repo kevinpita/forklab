@@ -1,0 +1,104 @@
+{
+  "validators": [
+    {
+      "operator_address": "cosmosvaloper12ss3eqmrxstruagwjj9v0pvkldu7hfqa3rp06h",
+      "consensus_pubkey": {
+        "type": "/cosmos.crypto.ed25519.PubKey",
+        "value": "liaxf3zpIaRq/Iax4wmDtVDYcBHgNqsmA7wgZNkeQnk="
+      },
+      "status": "BOND_STATUS_BONDED",
+      "tokens": "1000000000000000000000",
+      "delegator_shares": "1000000000000000000000.000000000000000000",
+      "description": {
+        "moniker": "node1"
+      },
+      "unbonding_time": "1970-01-01T00:00:00Z",
+      "commission": {
+        "commission_rates": {
+          "rate": "0.100000000000000000",
+          "max_rate": "0.200000000000000000",
+          "max_change_rate": "0.010000000000000000"
+        },
+        "update_time": "2026-09-30T04:12:47.108460051Z"
+      },
+      "min_self_delegation": "1"
+    },
+    {
+      "operator_address": "cosmosvaloper1n69z875s7x3dk2yt5t7000w4rs6gwndfaeqh6m",
+      "consensus_pubkey": {
+        "type": "/cosmos.crypto.ed25519.PubKey",
+        "value": "16cWu1BDpCGyoP4XhephPzzndyB/fC+QAQYy0NWJGMM="
+      },
+      "jailed": true,
+      "status": "BOND_STATUS_UNBONDING",
+      "tokens": "990000000000000000000",
+      "delegator_shares": "1000000000000000000000.000000000000000000",
+      "description": {
+        "moniker": "node3"
+      },
+      "unbonding_height": "101",
+      "unbonding_time": "2026-10-21T04:16:55.85058097Z",
+      "commission": {
+        "commission_rates": {
+          "rate": "0.100000000000000000",
+          "max_rate": "0.200000000000000000",
+          "max_change_rate": "0.010000000000000000"
+        },
+        "update_time": "2026-09-30T04:12:47.108460051Z"
+      },
+      "min_self_delegation": "1",
+      "unbonding_ids": [
+        "1"
+      ]
+    },
+    {
+      "operator_address": "cosmosvaloper1mgjshfgnnd64wwvpd0wnnqumdum4h9zlzurj5x",
+      "consensus_pubkey": {
+        "type": "/cosmos.crypto.ed25519.PubKey",
+        "value": "RfcSDE9AUn/NTQ/FHLxUaBPU4QTDjXtkXTBHM468vBE="
+      },
+      "status": "BOND_STATUS_BONDED",
+      "tokens": "1000000000000000000000",
+      "delegator_shares": "1000000000000000000000.000000000000000000",
+      "description": {
+        "moniker": "node2"
+      },
+      "unbonding_time": "1970-01-01T00:00:00Z",
+      "commission": {
+        "commission_rates": {
+          "rate": "0.100000000000000000",
+          "max_rate": "0.200000000000000000",
+          "max_change_rate": "0.010000000000000000"
+        },
+        "update_time": "2026-09-30T04:12:47.108460051Z"
+      },
+      "min_self_delegation": "1"
+    },
+    {
+      "operator_address": "cosmosvaloper1l3pfzsdfajrvvwh77gdady5004mpfdnrffqfuy",
+      "consensus_pubkey": {
+        "type": "/cosmos.crypto.ed25519.PubKey",
+        "value": "QjiDR/NchBAh6KE9IPVpqO2zF8FqTG90m8sXAI4J3WE="
+      },
+      "status": "BOND_STATUS_BONDED",
+      "tokens": "1000000000000000000000",
+      "delegator_shares": "1000000000000000000000.000000000000000000",
+      "description": {
+        "moniker": "node0"
+      },
+      "unbonding_time": "1970-01-01T00:00:00Z",
+      "commission": {
+        "commission_rates": {
+          "rate": "0.100000000000000000",
+          "max_rate": "0.200000000000000000",
+          "max_change_rate": "0.010000000000000000"
+        },
+        "update_time": "2026-09-30T04:12:47.108460051Z"
+      },
+      "min_self_delegation": "1"
+    }
+  ],
+  "pagination": {
+    "total": "4"
+  }
+}

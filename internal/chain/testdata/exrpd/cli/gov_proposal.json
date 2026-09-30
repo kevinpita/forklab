@@ -1,0 +1,39 @@
+{
+  "proposal": {
+    "id": "2",
+    "messages": [
+      {
+        "type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
+        "value": {
+          "authority": "ethm10d07y265gmmuvt4z0w9aw880jnsr700jpva843",
+          "plan": {
+            "name": "v-next",
+            "time": "0001-01-01T00:00:00Z",
+            "height": "63",
+            "info": "forklab"
+          }
+        }
+      }
+    ],
+    "status": "PROPOSAL_STATUS_VOTING_PERIOD",
+    "final_tally_result": {
+      "yes_count": "0",
+      "abstain_count": "0",
+      "no_count": "0",
+      "no_with_veto_count": "0"
+    },
+    "submit_time": "2026-09-30T04:03:59.206661739Z",
+    "deposit_end_time": "2026-09-30T04:04:29.206661739Z",
+    "total_deposit": [
+      {
+        "denom": "axrp",
+        "amount": "1"
+      }
+    ],
+    "voting_start_time": "2026-09-30T04:03:59.206661739Z",
+    "voting_end_time": "2026-09-30T04:04:29.206661739Z",
+    "title": "upgrade",
+    "summary": "upgrade proposal",
+    "proposer": "ethm1qg360xx257a9lu3nxfjwqt02g3ysckpamra3k9"
+  }
+}

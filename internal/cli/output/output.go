@@ -58,6 +58,13 @@ func Usage(err error) error {
 	return usageError{err}
 }
 
+// ExitStatus is an exit code passed through from a child process, as exec
+// does with the chain binary's. The child already reported its failure, so
+// nothing more is printed.
+type ExitStatus int
+
+func (e ExitStatus) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
+
 // ExitCode is the single place that maps an error to an exit code.
 func ExitCode(err error) Code {
 	switch {
@@ -103,6 +110,13 @@ func Print(w io.Writer, asJSON bool, r Result) error {
 		return nil
 	}
 	return r.WriteHuman(w)
+}
+
+// PrintFailedJSON writes r as the data of a JSON envelope with ok false, for
+// a command whose result describes its own failure, such as a child process
+// that exited non-zero.
+func PrintFailedJSON(w io.Writer, r Result) error {
+	return writeJSON(w, envelope{OK: false, Data: r})
 }
 
 // PrintError reports err and returns its exit code. JSON goes to stdout so a

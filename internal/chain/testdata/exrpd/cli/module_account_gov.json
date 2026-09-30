@@ -1,0 +1,15 @@
+{
+  "account": {
+    "type": "/cosmos.auth.v1beta1.ModuleAccount",
+    "value": {
+      "account_number": 9,
+      "address": "ethm10d07y265gmmuvt4z0w9aw880jnsr700jpva843",
+      "name": "gov",
+      "permissions": [
+        "burner"
+      ],
+      "public_key": "",
+      "sequence": 0
+    }
+  }
+}

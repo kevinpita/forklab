@@ -3,6 +3,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/signal"
@@ -34,7 +35,8 @@ func newRootCmd(a *app) *cobra.Command {
 		},
 	}
 	root.PersistentFlags().BoolVar(&a.json, "json", false, "print a JSON envelope instead of human output")
-	root.AddCommand(newVersionCmd(a), newProfileCmd(a), newBinaryCmd(a), newSnapshotCmd(a), newLabCmd(a), newNodeCmd(a), newSupervisorCmd(a))
+	root.AddCommand(newVersionCmd(a), newProfileCmd(a), newBinaryCmd(a), newSnapshotCmd(a), newLabCmd(a), newNodeCmd(a), newSupervisorCmd(a),
+		newStatusCmd(a), newConsensusCmd(a), newAccountCmd(a), newExecCmd(a), newGovCmd(a))
 	return root
 }
 
@@ -59,6 +61,9 @@ func execute(a *app, root *cobra.Command, args []string, stdout, stderr io.Write
 	err := root.Execute()
 	if err == nil {
 		return int(output.CodeOK)
+	}
+	if status := output.ExitStatus(0); errors.As(err, &status) {
+		return int(status)
 	}
 	// Bad commands, args, and flags (including required flags and flag groups)
 	// are rejected before the first user hook runs, so any error from that

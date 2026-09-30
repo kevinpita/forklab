@@ -48,6 +48,14 @@ func TestStatus(t *testing.T) {
 	}
 }
 
+func TestStatusAtHeightZeroIsNoBlocks(t *testing.T) {
+	status := strings.Replace(readFixture(t, "simd/status.json"), `"latest_block_height": "100"`, `"latest_block_height": "0"`, 1)
+	c := serve(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(status)) })
+	if _, err := c.Status(context.Background()); !errors.Is(err, ErrNoBlocks) {
+		t.Errorf("err = %v, want ErrNoBlocks", err)
+	}
+}
+
 func TestNetInfo(t *testing.T) {
 	tests := []struct {
 		chain string

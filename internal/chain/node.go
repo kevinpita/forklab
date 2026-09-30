@@ -24,7 +24,11 @@ type Status struct {
 	VotingPower      int64
 }
 
-// Status fetches /status.
+// ErrNoBlocks means the node answers but has not committed a block yet, so
+// its status says nothing about the chain.
+var ErrNoBlocks = errors.New("node has no blocks yet")
+
+// Status fetches /status. A node at height 0 is ErrNoBlocks.
 func (c *Client) Status(ctx context.Context) (Status, error) {
 	var r struct {
 		NodeInfo struct {
@@ -45,6 +49,9 @@ func (c *Client) Status(ctx context.Context) (Status, error) {
 	}
 	if err := c.call(ctx, "status", nil, &r); err != nil {
 		return Status{}, err
+	}
+	if r.SyncInfo.LatestHeight == 0 {
+		return Status{}, ErrNoBlocks
 	}
 	return Status{
 		NodeID:           r.NodeInfo.ID,

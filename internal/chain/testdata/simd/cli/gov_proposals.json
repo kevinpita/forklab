@@ -1,0 +1,69 @@
+{
+  "proposals": [
+    {
+      "id": "1",
+      "status": "PROPOSAL_STATUS_PASSED",
+      "final_tally_result": {
+        "yes_count": "2000000000000000000000",
+        "abstain_count": "0",
+        "no_count": "0",
+        "no_with_veto_count": "0"
+      },
+      "submit_time": "2026-09-30T04:03:05.952890019Z",
+      "deposit_end_time": "2026-09-30T04:03:35.952890019Z",
+      "total_deposit": [
+        {
+          "denom": "stake",
+          "amount": "1"
+        }
+      ],
+      "voting_start_time": "2026-09-30T04:03:05.952890019Z",
+      "voting_end_time": "2026-09-30T04:03:35.952890019Z",
+      "metadata": "hello",
+      "title": "hello",
+      "summary": "text proposal",
+      "proposer": "cosmos16n6aj9u7vy8hgf84nnkqr2vg54zmcanyfdq0py"
+    },
+    {
+      "id": "2",
+      "messages": [
+        {
+          "type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
+          "value": {
+            "authority": "cosmos10d07y265gmmuvt4z0w9aw880jnsr700j6zn9kn",
+            "plan": {
+              "name": "v-next",
+              "time": "0001-01-01T00:00:00Z",
+              "height": "63",
+              "info": "forklab"
+            }
+          }
+        }
+      ],
+      "status": "PROPOSAL_STATUS_REJECTED",
+      "final_tally_result": {
+        "yes_count": "0",
+        "abstain_count": "0",
+        "no_count": "0",
+        "no_with_veto_count": "0"
+      },
+      "submit_time": "2026-09-30T04:03:09.972462935Z",
+      "deposit_end_time": "2026-09-30T04:03:39.972462935Z",
+      "total_deposit": [
+        {
+          "denom": "stake",
+          "amount": "1"
+        }
+      ],
+      "voting_start_time": "2026-09-30T04:03:09.972462935Z",
+      "voting_end_time": "2026-09-30T04:03:39.972462935Z",
+      "title": "upgrade",
+      "summary": "upgrade proposal",
+      "proposer": "cosmos16n6aj9u7vy8hgf84nnkqr2vg54zmcanyfdq0py",
+      "failed_reason": "proposal did not get enough votes to pass"
+    }
+  ],
+  "pagination": {
+    "total": "2"
+  }
+}

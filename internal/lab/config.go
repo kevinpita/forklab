@@ -100,3 +100,31 @@ func nodeID(home string) (string, error) {
 	sum := sha256.Sum256(ed25519.PrivateKey(priv).Public().(ed25519.PublicKey))
 	return hex.EncodeToString(sum[:20]), nil
 }
+
+// ConsensusKey is a node's CometBFT validator key, from
+// config/priv_validator_key.json. PubKey is base64, as CometBFT reports it.
+type ConsensusKey struct {
+	Address string
+	PubKey  string
+}
+
+func ReadConsensusKey(home string) (ConsensusKey, error) {
+	path := filepath.Join(home, "config", "priv_validator_key.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ConsensusKey{}, err
+	}
+	var key struct {
+		Address string `json:"address"`
+		PubKey  struct {
+			Value string `json:"value"`
+		} `json:"pub_key"`
+	}
+	if err := json.Unmarshal(data, &key); err != nil {
+		return ConsensusKey{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if key.Address == "" || key.PubKey.Value == "" {
+		return ConsensusKey{}, fmt.Errorf("%s: no address or pub_key", path)
+	}
+	return ConsensusKey{Address: strings.ToUpper(key.Address), PubKey: key.PubKey.Value}, nil
+}
