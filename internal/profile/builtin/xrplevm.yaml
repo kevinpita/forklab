@@ -34,4 +34,4 @@ fresh_patches:
   - '.app_state.erc20.token_pairs = [{"contract_owner": 1, "erc20_address": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "denom": "axrp", "enabled": true, "owner_address": "ethm1zrxl239wa6ad5xge3gs68rt98227xgnjq0xyw2"}]'
 fork_patches:
   - '.app_state.ratelimit.hour_epoch.epoch_start_height = (.initial_height|tonumber)'
-  - '.app_state.bank.denom_metadata |= map(.denom_units[0].denom = .base | .display = .base)'
+  - '.app_state.bank.denom_metadata |= map(if .denom_units[0].denom != .base then (.denom_units[0].denom = .base | .display = .base) else . end)'

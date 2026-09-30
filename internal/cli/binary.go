@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -115,19 +116,8 @@ func newBinaryResolveCmd(a *app, rebuild bool) *cobra.Command {
 					return output.Usagef("binary build applies to git and src binaries; %s %s is not built, use binary fetch", profileName, version)
 				}
 			}
-			c, err := binaryCache()
-			if err != nil {
-				return err
-			}
-			opts := binary.Options{NoVerify: noVerify, Rebuild: rebuild}
 			stderr := cmd.ErrOrStderr()
-			bar := &progress{w: stderr, last: -1}
-			if !a.json {
-				opts.Progress = bar.update
-				opts.BuildLog = stderr
-			}
-			b, err := c.Resolve(cmd.Context(), e.Profile, version, opts)
-			bar.end()
+			b, err := resolveBinary(cmd.Context(), a, stderr, e.Profile, version, binary.Options{NoVerify: noVerify, Rebuild: rebuild})
 			if errors.Is(err, binary.ErrVersionMismatch) {
 				return fmt.Errorf("%w (pass --no-verify to accept it)", err)
 			}
@@ -148,6 +138,23 @@ func newBinaryResolveCmd(a *app, rebuild bool) *cobra.Command {
 	cmd.Flags().BoolVar(&noVerify, "no-verify", false, "accept a binary whose `version` output differs from the requested version")
 	_ = cmd.MarkFlagRequired("profile")
 	return cmd
+}
+
+// resolveBinary resolves a binary, drawing download progress and build
+// output on stderr unless output is JSON.
+func resolveBinary(ctx context.Context, a *app, stderr io.Writer, p profile.Profile, version string, opts binary.Options) (binary.Binary, error) {
+	c, err := binaryCache()
+	if err != nil {
+		return binary.Binary{}, err
+	}
+	bar := &progress{w: stderr, last: -1}
+	if !a.json {
+		opts.Progress = bar.update
+		opts.BuildLog = stderr
+	}
+	b, err := c.Resolve(ctx, p, version, opts)
+	bar.end()
+	return b, err
 }
 
 // progress redraws one download line on w each whole percent, or each MiB

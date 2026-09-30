@@ -93,7 +93,7 @@ func Run(ctx context.Context, opts Options) error {
 		s.nodes = append(s.nodes, n)
 	}
 
-	if err := checkSockPath(s.paths); err != nil {
+	if err := s.paths.CheckSock(); err != nil {
 		return err
 	}
 	_ = os.Remove(s.paths.Sock())
@@ -127,7 +127,8 @@ func Run(ctx context.Context, opts Options) error {
 // 108 bytes including the terminating NUL).
 const maxSockPath = 107
 
-func checkSockPath(p Paths) error {
+// CheckSock fails when the socket path is too long to bind.
+func (p Paths) CheckSock() error {
 	if len(p.Sock()) > maxSockPath {
 		return fmt.Errorf("socket path %s is %d bytes; unix sockets allow at most %d, move the lab to a shorter path", p.Sock(), len(p.Sock()), maxSockPath)
 	}
