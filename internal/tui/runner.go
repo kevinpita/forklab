@@ -108,7 +108,8 @@ func (r Runner) Run(ctx context.Context, c Command) Result {
 func labCreate(c Command) bool { return len(c) > 1 && c[0] == "lab" && c[1] == "create" }
 
 func (r Runner) RunWithProgress(ctx context.Context, c Command, report progress.Reporter) Result {
-	if !labCreate(c) {
+	supportsProgress := labCreate(c) || (len(c) > 1 && c[0] == "upgrade" && c[1] == "schedule")
+	if !supportsProgress {
 		return r.Run(ctx, c)
 	}
 	start := time.Now()

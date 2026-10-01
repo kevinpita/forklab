@@ -26,7 +26,7 @@ printf '%%s\n' '{"ok":true,"data":{"name":"demo"}}'
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	c := Command{"lab", "create", "demo"}
+	c := Command{"upgrade", "schedule", "2.0", "--in", "40"}
 	events := make(chan progress.Event, 1)
 	done := make(chan Result, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -167,5 +167,35 @@ exit 3
 	res := (Runner{Exe: bin}).RunWithProgress(context.Background(), Command{"lab", "create", "demo"}, func(e progress.Event) { events = append(events, e) })
 	if res.Err == nil || !strings.Contains(res.Err.Error(), "snapshot archive is corrupt") || len(events) != 1 {
 		t.Fatalf("failure: %+v events: %+v", res, events)
+	}
+}
+
+func TestEveryRunningFormShowsAnimatedActivity(t *testing.T) {
+	m := emptyModel(t)
+	m.form = newForm(m.th, 1, labCreateSpec(m, true))
+	m.form.spec.title = "Schedule upgrade"
+	m.form.running = Command{"upgrade", "schedule", "11.2.0", "--in", "40"}
+	m.form.started = time.Now()
+	m.form.progress.apply(progress.Event{Phase: "upgrade.confirm", Message: "Proposal #21 confirmed", State: progress.Completed})
+	m.form.progress.apply(progress.Event{Phase: "upgrade.voting", Message: "Waiting for voting to close", Detail: "Proposal #21 · voting ends 12:43:09", State: progress.Started})
+	m.w, m.h = 100, 30
+	first := ansi.Strip(strings.Join(m.formView(), "\n"))
+	m.spin = 12
+	second := ansi.Strip(strings.Join(m.formView(), "\n"))
+	if first == second {
+		t.Fatal("activity did not animate")
+	}
+	for _, want := range []string{"Waiting for voting to close", "Proposal #21 confirmed", "voting ends 12:43:09", "Elapsed", "Esc keeps it running"} {
+		if !strings.Contains(second, want) {
+			t.Fatalf("missing %q:\n%s", want, second)
+		}
+	}
+	if strings.Contains(second, "Profile") || strings.Contains(second, "%") {
+		t.Fatalf("editable fields or fake percent:\n%s", second)
+	}
+	m.form.progress = actionProgress{}
+	fallback := ansi.Strip(strings.Join(m.formView(), "\n"))
+	if !strings.Contains(fallback, "Running schedule upgrade") || strings.Contains(fallback, "lab creation") {
+		t.Fatalf("fallback:\n%s", fallback)
 	}
 }

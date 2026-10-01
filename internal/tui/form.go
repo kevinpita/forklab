@@ -701,8 +701,8 @@ func (m *Model) formView() []string {
 	vis := f.visible()
 	right := ""
 	switch {
-	case f.running != nil && labCreate(f.running):
-		right = "creating lab"
+	case f.running != nil:
+		right = "running"
 	case f.reviewing():
 		right = "step " + itoa(f.stepCount()) + " of " + itoa(f.stepCount()) + " · review"
 		lines = append(lines, " "+th.Title.Render("Review"), "")
@@ -732,7 +732,7 @@ func (m *Model) formView() []string {
 	// Keep the focused field in view when the fields outgrow the screen.
 	tail := m.formTail(inner)
 	room := max(m.bodyH()-2-len(tail), 1)
-	if f.running != nil && labCreate(f.running) {
+	if f.running != nil {
 		lines = m.progressLines(inner, room)
 	}
 	if len(lines) > room {
@@ -762,12 +762,8 @@ func (m *Model) formTail(inner int) []string {
 	}
 	switch {
 	case f.running != nil:
-		if labCreate(f.running) {
-			for _, line := range wrapWords("Esc keeps it running in the background", max(inner-2, 1)) {
-				out = append(out, " "+th.Dim.Render(line))
-			}
-		} else {
-			out = append(out, " "+th.Val.Render(spinFrame(m.spin))+" "+th.Text.Render("running "+fmtDur(time.Since(f.started).Round(time.Second)))+th.Dim.Render(" · esc keeps it running in the background"))
+		for _, line := range wrapWords("Esc keeps it running in the background", max(inner-2, 1)) {
+			out = append(out, " "+th.Dim.Render(line))
 		}
 	case f.err != nil:
 		ls := wrapWords("✗ "+oneLine(f.err.Error()), max(inner-2, 1))
@@ -782,7 +778,10 @@ func (m *Model) formTail(inner int) []string {
 		}
 		hints := []struct{ key, action string }{{"Enter", action}, {"Tab", "next"}, {"Shift+Tab", "back"}, {"Esc", "cancel"}}
 		if f.reviewing() {
-			hints[0].action = "create lab"
+			hints[0].action = "run"
+			if labCreate(f.command()) {
+				hints[0].action = "create lab"
+			}
 			hints = append(hints[:1], hints[2:]...)
 		} else if fl := f.focused(); fl != nil && (fl.kind == fieldSelect || fl.kind == fieldToggle) {
 			hints = append([]struct{ key, action string }{{"↑↓", "choose"}}, hints...)

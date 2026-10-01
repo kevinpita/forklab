@@ -20,6 +20,7 @@ import (
 	"github.com/kevinpita/forklab/internal/cli/output"
 	"github.com/kevinpita/forklab/internal/lab"
 	"github.com/kevinpita/forklab/internal/profile"
+	taskprogress "github.com/kevinpita/forklab/internal/progress"
 	"github.com/kevinpita/forklab/internal/supervisor"
 	"github.com/spf13/cobra"
 )
@@ -120,10 +121,12 @@ type scheduleFlags struct {
 	name       string
 	expedited  bool
 	noWait     bool
+	reporter   taskprogress.Reporter
 }
 
 func newUpgradeScheduleCmd(a *app, ref *string) *cobra.Command {
 	var f scheduleFlags
+	var progressFormat string
 	cmd := &cobra.Command{
 		Use:   "schedule <version> (--height H | --in N)",
 		Short: "Upgrade the lab to a profile version through governance",
@@ -135,6 +138,12 @@ func newUpgradeScheduleCmd(a *app, ref *string) *cobra.Command {
 			"--no-wait returns as soon as the plan is registered.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if progressFormat != "" && progressFormat != "json" {
+				return output.Usagef("--progress must be json")
+			}
+			if progressFormat == "json" {
+				f.reporter = taskprogress.JSON(cmd.ErrOrStderr())
+			}
 			e, err := openLab(*ref)
 			if err != nil {
 				return err
@@ -143,6 +152,7 @@ func newUpgradeScheduleCmd(a *app, ref *string) *cobra.Command {
 		},
 	}
 	fl := cmd.Flags()
+	fl.StringVar(&progressFormat, "progress", "", "live progress on stderr (json)")
 	fl.Int64Var(&f.height, "height", 0, "plan height")
 	fl.Int64Var(&f.in, "in", 0, "plan height as blocks from the current height")
 	fl.BoolVar(&f.noAutoSwap, "no-auto-swap", false, "leave halted nodes for a manual node restart --binary")
@@ -174,10 +184,11 @@ func schedule(cmd *cobra.Command, a *app, e labEnv, version string, f scheduleFl
 	if !slices.ContainsFunc(e.cfg.Nodes, func(n lab.Node) bool { return n.Version != version }) {
 		return fmt.Errorf("every node already runs version %s", version)
 	}
-	bin, err := resolveBinary(ctx, a, cmd.ErrOrStderr(), e.profile, version, binary.Options{})
+	bin, err := resolveBinary(ctx, a, cmd.ErrOrStderr(), e.profile, version, binary.Options{Reporter: f.reporter})
 	if err != nil {
 		return err
 	}
+	f.reporter.Emit("upgrade.prepare", "Checking upgrade window", taskprogress.Started)
 	c, rpc, err := e.liveCLI(ctx)
 	if err != nil {
 		return err
@@ -221,11 +232,12 @@ func schedule(cmd *cobra.Command, a *app, e labEnv, version string, f scheduleFl
 	if _, err := sup.SetUpgrade(&plan); err != nil {
 		return err
 	}
+	f.reporter.Emit("upgrade.prepare", fmt.Sprintf("Plan registered at height %d", height), taskprogress.Completed)
 	v := scheduleView{Plan: plan}
 	v.ProposalID, v.Votes, err = submitAndPass(ctx, c, rpc, e.cfg, p, voting, func(id uint64) {
 		plan.ProposalID = id
 		_, _ = sup.SetUpgrade(&plan)
-	})
+	}, f.reporter)
 	if errors.Is(err, errUndecided) {
 		return fmt.Errorf("%w; the plan stays registered with the supervisor and the nodes are swapped when they halt; follow with forklab upgrade status", err)
 	}
@@ -249,15 +261,16 @@ func schedule(cmd *cobra.Command, a *app, e labEnv, version string, f scheduleFl
 
 	swapCtx, cancel := context.WithTimeout(ctx, time.Duration(height-current)*blockTime+swapGrace)
 	defer cancel()
-	if nodes, err = waitSwapped(swapCtx, e.dir, name); err != nil {
+	if nodes, err = waitSwapped(swapCtx, e.dir, name, f.reporter); err != nil {
 		return fmt.Errorf("upgrade %q: %w%s", name, err, e.unswappedLogs(nodes))
 	}
 	pastCtx, cancelPast := context.WithTimeout(ctx, pastPlanTimeout)
 	defer cancelPast()
-	if v.Height, err = e.waitPast(pastCtx, height+pastPlanBlocks); err != nil {
+	if v.Height, err = e.waitPast(pastCtx, height+pastPlanBlocks, f.reporter); err != nil {
 		return fmt.Errorf("upgrade %q: every node was swapped to %s, but the chain did not pass height %d:\n%w", name, bin.Path, height+pastPlanBlocks, err)
 	}
 	v.Upgraded = true
+	f.reporter.Emit("upgrade.complete", "Recording completed upgrade", taskprogress.Started)
 	if sup, err = ensureSupervisor(ctx, e.dir); err == nil {
 		_, err = sup.CompleteUpgrade(name)
 	}
@@ -268,6 +281,7 @@ func schedule(cmd *cobra.Command, a *app, e labEnv, version string, f scheduleFl
 		e.cfg = cfg
 	}
 	v.Nodes = upgradeNodes(e.cfg, nodes)
+	f.reporter.Emit("upgrade.complete", "Upgrade completed", taskprogress.Completed)
 	return a.print(cmd, v)
 }
 
@@ -313,11 +327,14 @@ func terminal(status string) bool {
 // yes from every lab key that can pass it, and waits for the proposal to
 // pass. A proposal that ends any other way is an error naming the chain's
 // reason; any other error after submission wraps errUndecided.
-func submitAndPass(ctx context.Context, c chain.CLI, rpc *chain.Client, cfg lab.Config, p chain.ProposalFile, voting time.Duration, submitted func(id uint64)) (uint64, []voteResult, error) {
+func submitAndPass(ctx context.Context, c chain.CLI, rpc *chain.Client, cfg lab.Config, p chain.ProposalFile, voting time.Duration, submitted func(id uint64), report taskprogress.Reporter) (uint64, []voteResult, error) {
+	report.Emit("upgrade.submit", "Submitting upgrade proposal", taskprogress.Started)
 	hash, err := c.SubmitProposal(ctx, govKey, p)
 	if err != nil {
 		return 0, nil, err
 	}
+	report.Emit("upgrade.submit", "Proposal broadcast", taskprogress.Completed)
+	report.Emit("upgrade.confirm", "Waiting for proposal transaction", taskprogress.Started)
 	tx, err := waitTx(ctx, rpc, hash)
 	if err != nil {
 		return 0, nil, err
@@ -326,12 +343,16 @@ func submitAndPass(ctx context.Context, c chain.CLI, rpc *chain.Client, cfg lab.
 	if err != nil {
 		return 0, nil, err
 	}
+	report.Emit("upgrade.confirm", fmt.Sprintf("Proposal #%d confirmed", id), taskprogress.Completed)
 	submitted(id)
+	report.Emit("upgrade.vote", fmt.Sprintf("Voting yes on proposal #%d", id), taskprogress.Started)
 	undecided := func(err error) error { return fmt.Errorf("%w (%w)", err, errUndecided) }
 	votes, err := voteAll(ctx, c, rpc, autoVoters(cfg), id, "yes")
 	if err != nil {
 		return id, votes, undecided(fmt.Errorf("proposal %d submitted, but voting failed: %w", id, err))
 	}
+	report.Emit("upgrade.vote", fmt.Sprintf("%d votes confirmed", len(votes)), taskprogress.Completed)
+	report.Emit("upgrade.voting", "Waiting for voting to close", taskprogress.Started)
 	waitCtx, cancel := context.WithTimeout(ctx, voting+txTimeout)
 	defer cancel()
 	for {
@@ -340,7 +361,15 @@ func submitAndPass(ctx context.Context, c chain.CLI, rpc *chain.Client, cfg lab.
 			return id, votes, undecided(fmt.Errorf("proposal %d: %w", id, err))
 		}
 		if err == nil {
+			if report != nil {
+				detail := fmt.Sprintf("Proposal #%d · %s", id, prop.Status)
+				if prop.VotingEndTime != nil {
+					detail += " · voting ends " + prop.VotingEndTime.Local().Format("15:04:05 MST")
+				}
+				report(taskprogress.Event{Phase: "upgrade.voting", Message: "Waiting for voting to close", Detail: detail, State: taskprogress.Updated})
+			}
 			if prop.Status == "PASSED" {
+				report.Emit("upgrade.voting", fmt.Sprintf("Proposal #%d passed", id), taskprogress.Completed)
 				return id, votes, nil
 			}
 			if terminal(prop.Status) {
@@ -362,7 +391,8 @@ func submitAndPass(ctx context.Context, c chain.CLI, rpc *chain.Client, cfg lab.
 // spawning a new supervisor when the last one died so it finishes the swap.
 // A plan another command already completed counts as swapped. A failed swap
 // or a cleared plan ends the wait.
-func waitSwapped(ctx context.Context, dir, name string) ([]supervisor.NodeStatus, error) {
+func waitSwapped(ctx context.Context, dir, name string, report taskprogress.Reporter) ([]supervisor.NodeStatus, error) {
+	report.Emit("upgrade.swap", "Waiting for upgrade halt and restart", taskprogress.Started)
 	last := errors.New("no supervisor status yet")
 	var nodes []supervisor.NodeStatus
 	for {
@@ -371,7 +401,15 @@ func waitSwapped(ctx context.Context, dir, name string) ([]supervisor.NodeStatus
 			var st supervisor.Response
 			if st, err = sup.Upgrade(); err == nil {
 				nodes = st.Nodes
+				if report != nil {
+					detail := swapSummary(nodes)
+					if st.Upgrade != nil {
+						detail = fmt.Sprintf("Halt at height %d · %s", st.Upgrade.Height, detail)
+					}
+					report(taskprogress.Event{Phase: "upgrade.swap", Message: "Waiting for upgrade halt and restart", Detail: detail, State: taskprogress.Updated})
+				}
 				if st.Upgrade == nil && st.Completed != nil && st.Completed.Name == name {
+					report.Emit("upgrade.swap", "All nodes restarted on the new binary", taskprogress.Completed)
 					return nodes, nil
 				}
 				if st.Upgrade == nil {
@@ -385,6 +423,7 @@ func waitSwapped(ctx context.Context, dir, name string) ([]supervisor.NodeStatus
 					done = done && n.Upgrade == supervisor.SwapDone
 				}
 				if done {
+					report.Emit("upgrade.swap", "All nodes restarted on the new binary", taskprogress.Completed)
 					return nodes, nil
 				}
 				err = fmt.Errorf("nodes at %s", swapSummary(nodes))
@@ -426,12 +465,24 @@ func (e labEnv) unswappedLogs(nodes []supervisor.NodeStatus) string {
 // waitPast waits for every node to report height h and returns the highest
 // height seen. A node that does not get there is reported with its log
 // path and its last error lines.
-func (e labEnv) waitPast(ctx context.Context, h int64) (int64, error) {
+func (e labEnv) waitPast(ctx context.Context, h int64, report taskprogress.Reporter) (int64, error) {
+	report.Emit("upgrade.blocks", fmt.Sprintf("Waiting for blocks through height %d", h), taskprogress.Started)
 	heights := make([]int64, len(e.clients))
 	errs := make([]error, len(e.clients))
 	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var reached int64
+	total := int64(len(e.clients))
 	for i, c := range e.clients {
-		wg.Go(func() { heights[i], errs[i] = c.WaitHeight(ctx, h) })
+		wg.Go(func() {
+			heights[i], errs[i] = c.WaitHeight(ctx, h)
+			if errs[i] == nil && report != nil {
+				mu.Lock()
+				reached++
+				report(taskprogress.Event{Phase: "upgrade.blocks", Message: fmt.Sprintf("Waiting for blocks through height %d", h), Detail: fmt.Sprintf("%s reached height %d", e.cfg.Nodes[i].Name, heights[i]), State: taskprogress.Updated, Done: reached, Total: &total, Unit: "nodes"})
+				mu.Unlock()
+			}
+		})
 	}
 	wg.Wait()
 	var top int64
@@ -442,7 +493,11 @@ func (e labEnv) waitPast(ctx context.Context, h int64) (int64, error) {
 			errs[i] = fmt.Errorf("%s: %w; see %s\n%s", e.cfg.Nodes[i].Name, err, logPath, lastErrorLines(logPath, 5))
 		}
 	}
-	return top, errors.Join(errs...)
+	err := errors.Join(errs...)
+	if err == nil {
+		report.Emit("upgrade.blocks", fmt.Sprintf("Chain resumed at height %d", top), taskprogress.Completed)
+	}
+	return top, err
 }
 
 // lastErrorLines returns the last n lines of a node log that mention an
@@ -519,7 +574,7 @@ func newUpgradeCancelCmd(a *app, ref *string) *cobra.Command {
 			if p.Deposit, err = minDeposit(ctx, c, expedited); err != nil {
 				return err
 			}
-			if v.ProposalID, v.Votes, err = submitAndPass(ctx, c, rpc, e.cfg, p, voting, func(uint64) {}); err != nil {
+			if v.ProposalID, v.Votes, err = submitAndPass(ctx, c, rpc, e.cfg, p, voting, func(uint64) {}, nil); err != nil {
 				return err
 			}
 			sup, err := ensureSupervisor(ctx, e.dir)

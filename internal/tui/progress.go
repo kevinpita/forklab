@@ -138,12 +138,21 @@ func (m *Model) progressLines(inner, room int) []string {
 	e := p.current
 	message := e.Message
 	if message == "" {
-		message = "Preparing lab creation"
+		message = "Running " + strings.ToLower(f.spec.title)
 		if len(p.completed) > 0 {
-			message = "Continuing lab creation"
+			message = "Continuing " + strings.ToLower(f.spec.title)
 		}
 	}
 	lines := []string{" " + th.Val.Render(spinFrame(m.spin)) + " " + th.Title.Render(ansi.Truncate(message, max(width-2, 1), "…"))}
+	if e.Total == nil || e.Unit != "bytes" {
+		barW := max(min(width-2, 48), 1)
+		pulseW := min(6, barW)
+		position := m.spin % max(2*(barW-pulseW), 1)
+		if position > barW-pulseW {
+			position = 2*(barW-pulseW) - position
+		}
+		lines = append(lines, "   "+th.Dim.Render(strings.Repeat("─", position))+th.Val.Render(strings.Repeat("━", pulseW))+th.Dim.Render(strings.Repeat("─", barW-position-pulseW)))
+	}
 	if e.Unit == "bytes" {
 		text := progressBytes(e.Done)
 		if e.Total != nil {
