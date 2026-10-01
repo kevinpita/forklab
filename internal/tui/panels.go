@@ -514,10 +514,10 @@ func proposalMain(m *Model, w, _ int) mainView {
 	var wrapped []string
 	for _, line := range lines {
 		for _, part := range strings.Split(line, "\n") {
-			wrapped = append(wrapped, strings.Split(ansi.Hardwrap(part, max(w, 1), true), "\n")...)
+			wrapped = append(wrapped, strings.Split(ansi.Wrap(part, max(w, 1), ""), "\n")...)
 		}
 	}
-	lines = append(strings.Split(ansi.Hardwrap(th.Dim.Render("Enter: scroll details · C: clone · s: export · E: draft"), max(w, 1), true), "\n"), "")
+	lines = append(strings.Split(ansi.Wrap(th.Dim.Render("Enter: scroll details · C: clone · s: export · E: draft"), max(w, 1), ""), "\n"), "")
 	lines = append(lines, wrapped...)
 	return mainView{title: fmt.Sprintf("Proposal #%d", p.ID), right: st.Render(label), lines: lines}
 }

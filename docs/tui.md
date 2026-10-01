@@ -73,15 +73,19 @@ review creates the lab. `Tab` on review keeps the review open. Other forms run
 on `Enter`. `Esc` cancels an idle form or keeps a running command in the
 background.
 
-While a lab is being created, the form shows the current operation, recent
-completed steps, and elapsed time. Downloads show bytes transferred and a
-percentage when the server supplies a total. Cached binaries and snapshots
-show reuse instead of download progress. After `Esc`, the status line keeps
-showing the current operation.
+Running forms replace the input fields with an activity indicator, the current
+operation, elapsed time, and recent completed steps. Downloads show bytes
+transferred and a percentage when the server supplies a total. Cached binaries
+and snapshots show reuse instead of download progress.
 
-The TUI requests `lab create --progress=json` for live updates. This option
-writes versioned JSON progress records to stderr; stdout still contains one
-final result. Without this option, `--json` remains quiet until the result.
+Upgrade scheduling shows proposal confirmation, the voting deadline, each node's
+restart state, and block recovery. After `Esc`, the command continues in the
+background and the status line shows its current operation.
+
+The TUI requests `--progress=json` for `lab create` and `upgrade schedule`.
+This option writes versioned JSON progress records to stderr; stdout still
+contains one final result. Without this option, `--json` remains quiet until
+the result.
 
 This is `u` on the Upgrades panel:
 
