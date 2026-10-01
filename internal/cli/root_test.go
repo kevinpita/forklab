@@ -53,6 +53,7 @@ func TestUsageErrors(t *testing.T) {
 		{"unknown command", []string{"nope"}},
 		{"unknown flag", []string{"version", "--nope"}},
 		{"extra arg", []string{"version", "extra"}},
+		{"skill extra arg", []string{"skill", "extra"}},
 		{"unsupported completion shell", []string{"completion", "nope"}},
 	}
 	for _, tt := range tests {

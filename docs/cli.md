@@ -80,6 +80,7 @@ For tab completion and the `fl`, `flab`, and `flogs` helpers, see
 | `runbook run <file.yaml>` | Execute steps in order and save a report, including on execution failure |
 | `store <module> <hex-key>` | Inspect raw store bytes, with optional `--height` or `--prefix` |
 | `tui` | Open the terminal UI, the same as `forklab` with no command |
+| `skill` | Print the bundled agent skill |
 | `version` | Print the forklab version |
 
 Run `forklab <command> --help` for every flag. [Upgrades](upgrades.md) and

@@ -11,6 +11,7 @@ import (
 // unreachable are the CLI commands the TUI does not offer, with why.
 var unreachable = map[string]string{
 	"tui":        "it is the TUI",
+	"skill":      "prints agent instructions, not an interactive lab action",
 	"completion": "prints shell code for installation outside the TUI",
 	"shell init": "prints shell code for installation outside the TUI",
 }

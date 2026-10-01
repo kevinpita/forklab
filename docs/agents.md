@@ -13,6 +13,7 @@ Running forklab without a command opens the TUI.
 
 ```sh
 forklab version --json
+forklab skill
 forklab lab list --json
 forklab lab show demo --json
 forklab status --lab demo --json

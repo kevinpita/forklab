@@ -39,6 +39,7 @@ runbook show
 runbook validate
 runbook write
 shell init
+skill
 status
 store
 tui
