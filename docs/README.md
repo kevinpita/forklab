@@ -15,6 +15,10 @@ forklab runs one lab at a time. Many labs and profiles can exist on disk.
 
 ## Pages
 
+- [Agent guide](agents.md). CLI workflow, output handling, recovery, and the
+  [repository skill](../.agents/skills/forklab/SKILL.md).
+- [Shell integration](shell.md). Completions and shell helpers.
+
 - [TUI](tui.md). The terminal UI: panels, keys, forms, the first-lab wizard,
   themes, the command palette, and the command preview.
 - [CLI reference](cli.md). Every command, the `--json` envelope, NDJSON
@@ -26,6 +30,8 @@ forklab runs one lab at a time. Many labs and profiles can exist on disk.
   snapshot.
 - [Upgrades](upgrades.md). Scheduling an upgrade, automatic and manual binary
   swaps, cancelling, and resetting a lab after an upgrade.
+- [Runbooks](runbooks.md). Reusable recipes, assertions, exact-height pause,
+  raw stores, and execution reports.
 - [Development](development.md). The toolchain, `just` recipes, end-to-end
   tests, and rendering the screenshots.
 

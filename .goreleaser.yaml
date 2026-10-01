@@ -18,6 +18,10 @@ archives:
     files:
       - README.md
       - LICENSE
+      - AGENTS.md
+      - docs/**
+      - examples/runbooks/**
+      - .agents/skills/forklab/SKILL.md
 
 checksum:
   name_template: checksums.txt
