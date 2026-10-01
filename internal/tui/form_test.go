@@ -196,17 +196,17 @@ func TestFormArgv(t *testing.T) {
 		},
 		{
 			"text proposal", govSubmitSpec,
-			map[string]string{"title": "hello world"},
+			map[string]string{"outcome": "submit", "title": "hello world"},
 			"forklab gov submit --template text --title 'hello world' --auto-vote --json",
 		},
 		{
 			"params proposal", govSubmitSpec,
-			map[string]string{"template": "params", "module": "staking", "set": "max_validators=10 bond_denom=stake", "auto-vote": "false", "plan": "hidden"},
+			map[string]string{"outcome": "submit", "template": "params", "module": "staking", "set": "max_validators=10 bond_denom=stake", "auto-vote": "false", "plan": "hidden"},
 			"forklab gov submit --template params --module staking --set max_validators=10 --set bond_denom=stake --json",
 		},
 		{
 			"upgrade proposal", govSubmitSpec,
-			map[string]string{"template": "upgrade", "plan": "v2", "height": "100", "info": "x", "expedited": "true"},
+			map[string]string{"outcome": "submit", "template": "upgrade", "plan": "v2", "height": "100", "info": "x", "expedited": "true"},
 			"forklab gov submit --template upgrade --name v2 --height 100 --info x --expedited --auto-vote --json",
 		},
 		{"vote", govVoteSpec, map[string]string{"option": "veto", "from": "val0,val1"}, "forklab gov vote 1 veto --from val0,val1 --json"},

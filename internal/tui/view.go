@@ -52,6 +52,8 @@ func (m *Model) render() string {
 		body = overlay(body, m.confirmView(), m.w)
 	case overlayForm:
 		body = overlay(body, m.formView(), m.w)
+	case overlayProposal:
+		body = overlay(body, m.proposalEditorView(), m.w)
 	case overlayRecipe:
 		body = overlay(body, m.recipeView(), m.w)
 	}

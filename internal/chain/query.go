@@ -187,11 +187,15 @@ type rawTally struct {
 // Proposal is a gov v1 proposal. Status is the enum name without its
 // PROPOSAL_STATUS_ prefix, such as VOTING_PERIOD or PASSED.
 type Proposal struct {
-	ID       uint64   `json:"id"`
-	Title    string   `json:"title"`
-	Summary  string   `json:"summary"`
-	Status   string   `json:"status"`
-	Messages []string `json:"messages"`
+	ID              uint64            `json:"id"`
+	Title           string            `json:"title"`
+	Summary         string            `json:"summary"`
+	Status          string            `json:"status"`
+	Messages        []string          `json:"messages"`
+	MessagePayloads []json.RawMessage `json:"message_payloads"`
+	Metadata        string            `json:"metadata"`
+	DepositEndTime  *time.Time        `json:"deposit_end_time,omitempty"`
+	VotingStartTime *time.Time        `json:"voting_start_time,omitempty"`
 	// FinalTally is set once voting ends; use CLI.Tally while it runs.
 	FinalTally    Tally      `json:"final_tally"`
 	TotalDeposit  Coins      `json:"total_deposit"`
@@ -203,21 +207,21 @@ type Proposal struct {
 }
 
 type rawProposal struct {
-	ID       string `json:"id"`
-	Messages []struct {
-		Type   string `json:"type"`
-		AtType string `json:"@type"`
-	} `json:"messages"`
-	Status        string     `json:"status"`
-	FinalTally    rawTally   `json:"final_tally_result"`
-	TotalDeposit  Coins      `json:"total_deposit"`
-	SubmitTime    *time.Time `json:"submit_time"`
-	VotingEndTime *time.Time `json:"voting_end_time"`
-	Title         string     `json:"title"`
-	Summary       string     `json:"summary"`
-	Expedited     bool       `json:"expedited"`
-	FailedReason  string     `json:"failed_reason"`
-	Proposer      string     `json:"proposer"`
+	ID              string            `json:"id"`
+	Messages        []json.RawMessage `json:"messages"`
+	Metadata        string            `json:"metadata"`
+	DepositEndTime  *time.Time        `json:"deposit_end_time"`
+	VotingStartTime *time.Time        `json:"voting_start_time"`
+	Status          string            `json:"status"`
+	FinalTally      rawTally          `json:"final_tally_result"`
+	TotalDeposit    Coins             `json:"total_deposit"`
+	SubmitTime      *time.Time        `json:"submit_time"`
+	VotingEndTime   *time.Time        `json:"voting_end_time"`
+	Title           string            `json:"title"`
+	Summary         string            `json:"summary"`
+	Expedited       bool              `json:"expedited"`
+	FailedReason    string            `json:"failed_reason"`
+	Proposer        string            `json:"proposer"`
 }
 
 func (r rawProposal) proposal() (Proposal, error) {
@@ -227,13 +231,21 @@ func (r rawProposal) proposal() (Proposal, error) {
 	}
 	p := Proposal{
 		ID: id, Title: r.Title, Summary: r.Summary,
+		Metadata: r.Metadata, MessagePayloads: r.Messages, DepositEndTime: r.DepositEndTime, VotingStartTime: r.VotingStartTime,
 		Status:     strings.TrimPrefix(r.Status, "PROPOSAL_STATUS_"),
 		Messages:   []string{},
 		FinalTally: Tally(r.FinalTally), TotalDeposit: r.TotalDeposit,
 		SubmitTime: r.SubmitTime, VotingEndTime: r.VotingEndTime,
 		Expedited: r.Expedited, FailedReason: r.FailedReason, Proposer: r.Proposer,
 	}
-	for _, m := range r.Messages {
+	for _, raw := range r.Messages {
+		var m struct {
+			AtType string `json:"@type"`
+			Type   string `json:"type"`
+		}
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return Proposal{}, err
+		}
 		p.Messages = append(p.Messages, cmp.Or(m.AtType, m.Type))
 	}
 	return p, nil

@@ -35,6 +35,7 @@ const (
 	overlayConfirm
 	overlayForm
 	overlayRecipe
+	overlayProposal
 )
 
 // loadKind names one polled query. Each has its own sequence so a slow
@@ -87,21 +88,22 @@ type Model struct {
 	focus focusArea
 	panel panelID
 
-	overlay  overlayKind
-	cursor   [numPanels]int
-	scroll   int // main pane scroll for detail views
-	helpOff  int
-	helpFrom overlayKind
-	palette  paletteState
-	input    textinput.Model
-	preview  int
-	pending  *pendingRun
-	form     *form
-	recipe   *recipeEditor
-	formSeq  int
-	quitting bool
-	spinning bool
-	spin     int
+	overlay       overlayKind
+	cursor        [numPanels]int
+	scroll        int // main pane scroll for detail views
+	helpOff       int
+	helpFrom      overlayKind
+	palette       paletteState
+	input         textinput.Model
+	preview       int
+	pending       *pendingRun
+	form          *form
+	recipe        *recipeEditor
+	proposalDraft *proposalEditor
+	formSeq       int
+	quitting      bool
+	spinning      bool
+	spin          int
 
 	loads   [numLoads]loadState
 	streams [numStreams]streamState
@@ -231,10 +233,14 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 		m.sizeForm()
+		m.sizeProposalEditor()
 		return nil
 	case tea.KeyPressMsg:
 		return m.key(msg)
 	case tea.PasteMsg:
+		if m.overlay == overlayProposal {
+			return m.proposalEditorInput(msg)
+		}
 		if m.overlay == overlayForm {
 			return m.formKey(msg)
 		}
@@ -273,10 +279,16 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		m.startStream(msg.kind, st.target)
 		return nil
 	}
+	if m.overlay == overlayProposal {
+		return m.proposalEditorInput(msg)
+	}
 	return nil
 }
 
 func (m *Model) key(msg tea.KeyPressMsg) tea.Cmd {
+	if m.overlay == overlayProposal {
+		return m.proposalEditorKey(msg)
+	}
 	key := msg.String()
 	b, ok := m.match(key)
 	if !ok {
@@ -533,6 +545,7 @@ func (m *Model) applyAction(msg actionMsg) tea.Cmd {
 	m.last = &res
 	m.formDone(msg)
 	m.recipeDone(res)
+	m.proposalEditorDone(msg)
 	if m.quitting && len(m.running) == 0 {
 		return m.quit()
 	}

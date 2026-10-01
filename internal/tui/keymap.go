@@ -85,6 +85,10 @@ const (
 	actSend
 	actProposalNew
 	actProposalVote
+	actProposalExport
+	actProposalClone
+	actProposalDraft
+	actProposalSubmitFile
 	actProfileNew
 	actProfileEdit
 	actProfileDelete
@@ -287,6 +291,10 @@ var catalog = []binding{
 		runs(func(m *Model) Command { return append(labCmd("show")(m), "--show-mnemonics") }, "", false).shows(),
 
 	bind(actProposalNew, scopeProposals, "New proposal", "n").foot(10, "new").onlyIf(chainUp).opens(govSubmitSpec),
+	bind(actProposalExport, scopeProposals, "Export proposal record", "s").foot(12, "export").onlyIf(hasProposal).opens(proposalExportSpec),
+	bind(actProposalClone, scopeProposals, "Clone proposal into draft", "C").foot(13, "clone").onlyIf(hasProposal),
+	bind(actProposalDraft, scopeProposals, "Reopen proposal draft", "E").foot(14, "draft").onlyIf(func(m *Model) bool { return m.proposalDraft != nil }),
+	bind(actProposalSubmitFile, scopeProposals, "Submit saved proposal file", "S").onlyIf(chainUp).opens(proposalSubmitFileSpec),
 	bind(actProposalVote, scopeProposals, "Vote", "v").foot(11, "vote").onlyIf(hasProposal).opens(govVoteSpec),
 
 	bind(actUpgradeSchedule, scopeUpgrades, "Schedule an upgrade", "u").foot(10, "schedule").onlyIf(chainUp).opens(upgradeScheduleSpec),
@@ -644,7 +652,13 @@ var handlers map[action]func(*Model) tea.Cmd
 
 func init() {
 	handlers = map[action]func(*Model) tea.Cmd{
-		actQuit:           (*Model).quit,
+		actQuit:          (*Model).quit,
+		actProposalClone: (*Model).cloneProposal,
+		actProposalDraft: func(m *Model) tea.Cmd {
+			m.openOverlay(overlayProposal)
+			m.sizeProposalEditor()
+			return m.proposalDraft.Input.Focus()
+		},
 		actHelp:           (*Model).openHelp,
 		actPalette:        func(m *Model) tea.Cmd { m.openPalette(""); return nil },
 		actCommandLine:    func(m *Model) tea.Cmd { m.openPalette("forklab "); return nil },

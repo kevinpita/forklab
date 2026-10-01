@@ -26,7 +26,7 @@ func newGovCmd(a *app) *cobra.Command {
 		Short: "Submit, vote on, and inspect governance proposals",
 	}
 	labRefFlag(cmd, &ref)
-	cmd.AddCommand(newGovSubmitCmd(a, &ref), newGovVoteCmd(a, &ref), newGovListCmd(a, &ref), newGovShowCmd(a, &ref))
+	cmd.AddCommand(newGovSubmitCmd(a, &ref), newGovVoteCmd(a, &ref), newGovListCmd(a, &ref), newGovShowCmd(a, &ref), newGovFileCmd(a, &ref, false), newGovFileCmd(a, &ref, true), newGovWriteCmd(a))
 	return cmd
 }
 
@@ -84,6 +84,8 @@ type proposalFlags struct {
 func newGovSubmitCmd(a *app, ref *string) *cobra.Command {
 	var f proposalFlags
 	var autoVote bool
+	var savePath string
+	var force bool
 	cmd := &cobra.Command{
 		Use:   "submit [file.json]",
 		Short: "Submit a proposal from a file or a template, from the lab's gov key",
@@ -99,6 +101,14 @@ func newGovSubmitCmd(a *app, ref *string) *cobra.Command {
 			if err := f.validate(); err != nil {
 				return err
 			}
+			if cmd.Flags().Changed("output") {
+				if savePath == "" {
+					return output.Usagef("--output needs a nonempty file path")
+				}
+				if len(args) != 0 {
+					return output.Usagef("--output requires a template")
+				}
+			}
 			e, err := openLab(*ref)
 			if err != nil {
 				return err
@@ -107,6 +117,16 @@ func newGovSubmitCmd(a *app, ref *string) *cobra.Command {
 			c, rpc, err := e.liveCLI(ctx)
 			if err != nil {
 				return err
+			}
+			if cmd.Flags().Changed("output") {
+				p, err := buildProposal(ctx, c, f)
+				if err != nil {
+					return err
+				}
+				if err := writeProposalFile(savePath, p, force); err != nil {
+					return err
+				}
+				return a.print(cmd, proposalSaved{savePath})
 			}
 			var hash string
 			var warnings []string
@@ -148,6 +168,8 @@ func newGovSubmitCmd(a *app, ref *string) *cobra.Command {
 		},
 	}
 	fl := cmd.Flags()
+	fl.StringVar(&savePath, "output", "", "save the template to a JSON file without submitting or voting")
+	fl.BoolVar(&force, "force", false, "replace the output file atomically")
 	fl.StringVar(&f.template, "template", "", "build the proposal: text, upgrade, or params")
 	fl.StringVar(&f.title, "title", "", "proposal title (default per template)")
 	fl.StringVar(&f.summary, "summary", "", "proposal summary (default: the title)")

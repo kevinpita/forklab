@@ -125,18 +125,22 @@ type tally struct {
 }
 
 type proposal struct {
-	ID            uint64     `json:"id"`
-	Title         string     `json:"title"`
-	Summary       string     `json:"summary"`
-	Status        string     `json:"status"`
-	Messages      []string   `json:"messages"`
-	FinalTally    tally      `json:"final_tally"`
-	TotalDeposit  []coin     `json:"total_deposit"`
-	SubmitTime    *time.Time `json:"submit_time"`
-	VotingEndTime *time.Time `json:"voting_end_time"`
-	Expedited     bool       `json:"expedited"`
-	FailedReason  string     `json:"failed_reason"`
-	Proposer      string     `json:"proposer"`
+	MessagePayloads []json.RawMessage `json:"message_payloads"`
+	Metadata        string            `json:"metadata"`
+	DepositEndTime  *time.Time        `json:"deposit_end_time"`
+	VotingStartTime *time.Time        `json:"voting_start_time"`
+	ID              uint64            `json:"id"`
+	Title           string            `json:"title"`
+	Summary         string            `json:"summary"`
+	Status          string            `json:"status"`
+	Messages        []string          `json:"messages"`
+	FinalTally      tally             `json:"final_tally"`
+	TotalDeposit    []coin            `json:"total_deposit"`
+	SubmitTime      *time.Time        `json:"submit_time"`
+	VotingEndTime   *time.Time        `json:"voting_end_time"`
+	Expedited       bool              `json:"expedited"`
+	FailedReason    string            `json:"failed_reason"`
+	Proposer        string            `json:"proposer"`
 	// Tally is the live count, set only by gov show.
 	Tally *tally `json:"tally"`
 }

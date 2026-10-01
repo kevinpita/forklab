@@ -98,8 +98,8 @@ func TestFooterShowsOnlyEnabledBindings(t *testing.T) {
 func TestDisabledBindingFallsThrough(t *testing.T) {
 	m := loadedModel(t, buildTheme("ansi", true))
 	m.panel = panelProposals
-	if b, ok := m.match("s"); ok {
-		t.Errorf("s matched %q outside the Nodes panel", b.name)
+	if b, ok := m.match("s"); !ok || b.id != actProposalExport {
+		t.Errorf("s should export the selected proposal")
 	}
 	if b, ok := m.match("r"); ok {
 		t.Errorf("r matched %q outside the Nodes panel", b.name)

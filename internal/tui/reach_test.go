@@ -53,6 +53,12 @@ func offered(t *testing.T) []Command {
 			}
 		}
 	}
+	m := loadedModel(t, buildTheme("ansi", true))
+	m.panel = panelProposals
+	_ = m.cloneProposal()
+	out = append(out, m.running[len(m.running)-1].cmd)
+	m.proposalDraft.Action = 0
+	out = append(out, proposalSaveSpec(m).build(values{"path": "draft.json"}))
 	return append(out, Command{"status", "-w"}, Command{"consensus", "-w"}, logsCmd("0"))
 }
 

@@ -54,7 +54,7 @@ Press `?` for the keys of the focused panel.
 | Panel list | `j`/`k` move, `g`/`G` first or last, `Enter` focus the main pane |
 | Main pane | `j`/`k` scroll, `PgUp`/`PgDn` page, `g`/`G` top or bottom, `Esc` back to the list |
 | Nodes | `s` stop, `S` start, `K` kill, `r` restart, `R` restart on a version, `l` follow logs, `w` wrap |
-| Proposals | `n` new proposal, `v` vote |
+| Proposals | `Enter` scroll details, `n` new proposal, `v` vote, `s` export record, `C` clone, `E` reopen draft, `S` submit saved file |
 | Upgrades | `u` schedule, `X` cancel |
 | Accounts | `s` send |
 | Labs | `n` new, `u` up, `d` down, `R` reset, `D` delete, `m` keys and mnemonics |
@@ -139,3 +139,17 @@ one.
 `--theme` (or `FORKLAB_THEME`) picks `ansi`, `tokyonight`, `catppuccin`, or
 `gruvbox`, and `T` cycles them. The default is `ansi`. The screenshots use
 `tokyonight`.
+
+Proposal details include wrapped summaries, full dates, metadata, and message JSON.
+Press `Enter` to focus the details, then use the scrolling keys to read the whole proposal.
+`C` clones the selected proposal into a retained JSON editor with the current minimum deposit.
+Edit any submission field, then press `Ctrl+s` to choose a file. `Esc` closes the editor and
+`E` reopens the draft. Saving never submits a transaction. Existing files require the explicit
+Overwrite option. New proposal forms default to saving a file; choose Submit to chain to broadcast.
+`s` exports the selected chain record including its tally, while `S` submits a saved draft after review.
+
+The equivalent CLI commands are `forklab gov export <id> <file.json>`,
+`forklab gov draft <id> --json`, and `forklab gov write <file.json> --document '<JSON>'`.
+Use `forklab gov submit --template text --output <file.json>` to save a new template,
+and `forklab gov submit <file.json>` to submit a saved draft. File commands refuse to
+overwrite existing files unless `--force` is supplied.

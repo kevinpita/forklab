@@ -652,6 +652,9 @@ func govSubmitSpec(*Model) *formSpec {
 	return &formSpec{
 		title: "New proposal",
 		fields: []fieldSpec{
+			{key: "outcome", label: "Action", kind: fieldSelect, def: "save", options: []option{{"save", "Save to file"}, {"submit", "Submit to chain"}}},
+			{key: "path", label: "JSON file", kind: fieldText, show: has("outcome", "save"), placeholder: "./proposal.json"},
+			{key: "force", label: "Overwrite", kind: fieldToggle, show: has("outcome", "save")},
 			{
 				key: "template", label: "Template", kind: fieldSelect, def: "text",
 				options: []option{{"text", "text  signaling only"}, {"params", "params  change module params"}, {"upgrade", "upgrade  software upgrade plan"}},
@@ -671,10 +674,16 @@ func govSubmitSpec(*Model) *formSpec {
 			{key: "height", label: "Height", kind: fieldNumber, show: has("template", "upgrade")},
 			{key: "info", label: "Plan info", kind: fieldText, optional: true, show: has("template", "upgrade")},
 			{key: "expedited", label: "Expedited", kind: fieldToggle},
-			{key: "auto-vote", label: "Auto vote", kind: fieldToggle, def: "true", hint: "vote yes from every lab key that can pass it"},
+			{key: "auto-vote", label: "Auto vote", kind: fieldToggle, def: "true", show: has("outcome", "submit"), hint: "vote yes from every lab key that can pass it"},
 		},
 		build: func(v values) Command {
 			c := Command{"gov", "submit", "--template", v["template"]}
+			if v["outcome"] == "save" {
+				c = append(c, "--output", v["path"])
+				if v["force"] != "" {
+					c = append(c, "--force")
+				}
+			}
 			for _, k := range []string{"title", "summary", "module"} {
 				if v[k] != "" {
 					c = append(c, "--"+k, v[k])
@@ -692,7 +701,7 @@ func govSubmitSpec(*Model) *formSpec {
 				}
 			}
 			for _, t := range []string{"expedited", "auto-vote"} {
-				if v[t] != "" {
+				if v[t] != "" && (t != "auto-vote" || v["outcome"] != "save") {
 					c = append(c, "--"+t)
 				}
 			}

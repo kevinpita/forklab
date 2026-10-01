@@ -5,10 +5,13 @@ binary fetch
 binary list
 consensus
 exec
+gov draft
+gov export
 gov list
 gov show
 gov submit
 gov vote
+gov write
 lab create
 lab delete
 lab down

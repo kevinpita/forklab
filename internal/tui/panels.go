@@ -448,6 +448,9 @@ func proposalMain(m *Model, w, _ int) mainView {
 	if !ok {
 		return mainView{title: "Proposal", lines: m.emptyHint(loadProposals, "no proposals yet")}
 	}
+	if m.proposal != nil && m.proposal.ID == p.ID {
+		p = *m.proposal
+	}
 	live := p.FinalTally
 	if m.proposal != nil && m.proposal.ID == p.ID && m.proposal.Tally != nil {
 		live = *m.proposal.Tally
@@ -461,10 +464,10 @@ func proposalMain(m *Model, w, _ int) mainView {
 	}
 	lines = append(lines, "")
 	if p.SubmitTime != nil {
-		lines = append(lines, kv(th, "submitted  ", p.SubmitTime.Local().Format("15:04:05")))
+		lines = append(lines, kv(th, "submitted  ", p.SubmitTime.Local().Format(time.RFC3339)))
 	}
 	if p.VotingEndTime != nil {
-		lines = append(lines, kv(th, "voting end ", p.VotingEndTime.Local().Format("15:04:05")+"  "+st.Render(label)))
+		lines = append(lines, kv(th, "voting end ", p.VotingEndTime.Local().Format(time.RFC3339)+"  "+st.Render(label)))
 	}
 	if p.Expedited {
 		lines = append(lines, kv(th, "expedited  ", th.Accent2.Render("yes")))
@@ -475,6 +478,22 @@ func proposalMain(m *Model, w, _ int) mainView {
 	}
 	if p.FailedReason != "" {
 		lines = append(lines, kv(th, "failed     ", th.Bad.Render(p.FailedReason)))
+	}
+	if p.DepositEndTime != nil {
+		lines = append(lines, "deposit end  "+p.DepositEndTime.Local().Format(time.RFC3339))
+	}
+	if p.VotingStartTime != nil {
+		lines = append(lines, "voting start "+p.VotingStartTime.Local().Format(time.RFC3339))
+	}
+	if p.Metadata != "" {
+		lines = append(lines, "", th.Title.Render("METADATA"), p.Metadata)
+	}
+	for _, raw := range p.MessagePayloads {
+		var pretty bytes.Buffer
+		if json.Indent(&pretty, raw, "", "  ") == nil {
+			lines = append(lines, "", th.Title.Render("MESSAGE JSON"))
+			lines = append(lines, strings.Split(pretty.String(), "\n")...)
+		}
 	}
 	lines = append(lines, "", th.Title.Render("TALLY"))
 	yes, no, abs, veto := bigOf(live.Yes), bigOf(live.No), bigOf(live.Abstain), bigOf(live.NoWithVeto)
@@ -492,6 +511,14 @@ func proposalMain(m *Model, w, _ int) mainView {
 		lines = append(lines, fmt.Sprintf("%s %s %s  %s", t.st.Render(padRight(t.name, 8)), bar(th, frac, barW, -1),
 			padLeft(fmt.Sprintf("%.1f%%", frac*100), 6), th.Dim.Render(compactAmount(t.v.Text('f', 0)))))
 	}
+	var wrapped []string
+	for _, line := range lines {
+		for _, part := range strings.Split(line, "\n") {
+			wrapped = append(wrapped, strings.Split(ansi.Hardwrap(part, max(w, 1), true), "\n")...)
+		}
+	}
+	lines = append(strings.Split(ansi.Hardwrap(th.Dim.Render("Enter: scroll details · C: clone · s: export · E: draft"), max(w, 1), true), "\n"), "")
+	lines = append(lines, wrapped...)
 	return mainView{title: fmt.Sprintf("Proposal #%d", p.ID), right: st.Render(label), lines: lines}
 }
 
