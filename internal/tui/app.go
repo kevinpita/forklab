@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kevinpita/forklab/internal/progress"
+
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 )
@@ -129,8 +131,10 @@ type Model struct {
 	// quietSince is when a running lab's chain last stopped answering.
 	quietSince time.Time
 
-	running []runningCmd
-	last    *Result
+	actionSeq int
+	progress  *progressInbox
+	running   []runningCmd
+	last      *Result
 	// output is the result of a command run from the palette, shown in the
 	// main pane until the user moves on.
 	output *Result
@@ -141,8 +145,11 @@ type paletteState struct {
 }
 
 type runningCmd struct {
-	cmd Command
-	at  time.Time
+	id       int
+	form     int
+	progress actionProgress
+	cmd      Command
+	at       time.Time
 }
 
 // pendingRun is an action waiting in the confirm overlay.
@@ -160,7 +167,9 @@ type (
 		res  Result
 	}
 	actionMsg struct {
-		res Result
+		id   int
+		form int
+		res  Result
 		// show puts the result in the main pane.
 		show bool
 	}
@@ -174,13 +183,13 @@ type (
 
 // New builds the model. ctx bounds every subprocess the TUI starts.
 func New(ctx context.Context, run Runner, th Theme) *Model {
-	return &Model{ctx: ctx, run: run, th: th, events: make(chan streamEvent, 512), logs: logBuffer{follow: true}}
+	return &Model{ctx: ctx, run: run, th: th, events: make(chan streamEvent, 512), progress: newProgressInbox(), logs: logBuffer{follow: true}}
 }
 
 func (m *Model) Init() tea.Cmd {
 	m.startStream(streamStatus, "")
 	m.startStream(streamConsensus, "")
-	return tea.Batch(m.waitStream(), m.poll(true), tick())
+	return tea.Batch(m.waitStream(), m.progress.wait(m.ctx), m.poll(true), tick())
 }
 
 func tick() tea.Cmd {
@@ -247,6 +256,9 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return spinTick()
 	case resultMsg:
 		return m.applyLoad(msg)
+	case progressReadyMsg:
+		m.drainProgress()
+		return m.progress.wait(m.ctx)
 	case actionMsg:
 		return m.applyAction(msg)
 	case formOptionsMsg:
@@ -439,7 +451,7 @@ func (m *Model) request(b binding) tea.Cmd {
 		m.openOverlay(overlayConfirm)
 		return nil
 	}
-	return m.exec(c, b.show)
+	return m.exec(c, b.show, 0)
 }
 
 func (m *Model) confirmRun() tea.Cmd {
@@ -448,7 +460,7 @@ func (m *Model) confirmRun() tea.Cmd {
 	if p == nil {
 		return nil
 	}
-	return m.exec(p.cmd, p.show)
+	return m.exec(p.cmd, p.show, 0)
 }
 
 // runRaw runs a command typed into the palette. Streaming flags are refused
@@ -464,7 +476,7 @@ func (m *Model) runRaw(args []string) tea.Cmd {
 			return nil
 		}
 	}
-	return m.exec(c, true)
+	return m.exec(c, true, 0)
 }
 
 // streams reports whether a raw argument makes a command run until canceled.
@@ -475,11 +487,24 @@ func streams(a string) bool {
 	return len(a) > 1 && a[0] == '-' && a[1] != '-' && strings.ContainsAny(a[1:], "fw")
 }
 
-func (m *Model) exec(c Command, show bool) tea.Cmd {
-	m.running = append(m.running, runningCmd{cmd: c, at: time.Now()})
+func (m *Model) exec(c Command, show bool, owner int) tea.Cmd {
+	m.actionSeq++
+	id := m.actionSeq
+	m.running = append(m.running, runningCmd{id: id, form: owner, cmd: c, at: time.Now()})
+	if owner != 0 && m.form != nil && m.form.id == owner {
+		m.form.action = id
+	}
 	// Actions outlive a canceled context so a quit never kills one half done.
 	run, ctx := m.run, context.WithoutCancel(m.ctx)
-	cmds := []tea.Cmd{func() tea.Msg { return actionMsg{res: run.Run(ctx, c), show: show} }}
+	inbox, uiCtx := m.progress, m.ctx
+	cmds := []tea.Cmd{func() tea.Msg {
+		report := func(e progress.Event) {
+			if uiCtx.Err() == nil {
+				inbox.send(progressMsg{id: id, event: e})
+			}
+		}
+		return actionMsg{id: id, form: owner, res: run.RunWithProgress(ctx, c, report), show: show}
+	}}
 	if !m.spinning {
 		m.spinning = true
 		cmds = append(cmds, spinTick())
@@ -492,15 +517,21 @@ func spinTick() tea.Cmd {
 }
 
 func (m *Model) applyAction(msg actionMsg) tea.Cmd {
+	m.drainProgress()
+	found := false
 	for i, r := range m.running {
-		if r.cmd.String() == msg.res.Cmd.String() {
+		if r.id == msg.id {
+			found = true
 			m.running = append(m.running[:i:i], m.running[i+1:]...)
 			break
 		}
 	}
+	if !found {
+		return nil
+	}
 	res := msg.res
 	m.last = &res
-	m.formDone(res)
+	m.formDone(msg)
 	m.recipeDone(res)
 	if m.quitting && len(m.running) == 0 {
 		return m.quit()

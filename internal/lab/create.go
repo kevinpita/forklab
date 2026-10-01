@@ -19,14 +19,16 @@ import (
 
 	"github.com/kevinpita/forklab/internal/genesis"
 	"github.com/kevinpita/forklab/internal/profile"
+	"github.com/kevinpita/forklab/internal/progress"
 	"github.com/kevinpita/forklab/internal/supervisor"
 )
 
 // CreateInput describes a lab to build.
 type CreateInput struct {
-	Name    string
-	Profile profile.Entry
-	Version string
+	Reporter progress.Reporter
+	Name     string
+	Profile  profile.Entry
+	Version  string
 	// Binary resolves the chain binary path. It runs after the cheap checks,
 	// since it may download or build.
 	Binary       func(context.Context) (string, error)
@@ -99,7 +101,7 @@ func (l Labs) Create(ctx context.Context, in CreateInput) (Config, string, error
 	}
 	var exported *exportedState
 	if in.Fork != nil {
-		if exported, err = loadExport(ctx, bin, *in.Fork); err != nil {
+		if exported, err = loadExport(ctx, bin, *in.Fork, in.Reporter); err != nil {
 			return Config{}, "", fmt.Errorf("lab %s: %w", in.Name, err)
 		}
 	}
@@ -131,9 +133,11 @@ func (l Labs) Create(ctx context.Context, in CreateInput) (Config, string, error
 	if err != nil {
 		return Config{}, "", fmt.Errorf("lab %s: %w (log: %s)", in.Name, err, logPath)
 	}
+	in.Reporter.Emit("lab.publish", "Publishing lab", progress.Started)
 	if err := os.Rename(partial, dir); err != nil {
 		return Config{}, "", err
 	}
+	in.Reporter.Emit("lab.publish", "Lab created", progress.Completed)
 	return c, dir, nil
 }
 
@@ -186,11 +190,12 @@ type exportedState struct {
 }
 
 // loadExport runs the fork export and parses its result.
-func loadExport(ctx context.Context, bin string, in ForkInput) (*exportedState, error) {
+func loadExport(ctx context.Context, bin string, in ForkInput, report progress.Reporter) (*exportedState, error) {
 	archive, path, err := in.Export(ctx, bin)
 	if err != nil {
 		return nil, err
 	}
+	report.Emit("snapshot.load", "Loading exported chain state", progress.Started)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -203,6 +208,7 @@ func loadExport(ctx context.Context, bin string, in ForkInput) (*exportedState, 
 	if err != nil {
 		return nil, fmt.Errorf("exported genesis %s: %w", path, err)
 	}
+	report.Emit("snapshot.load", "Exported state loaded", progress.Completed)
 	return &exportedState{genesis: g, info: Fork{Source: in.Source, Archive: archive, Height: height.Int64()}}, nil
 }
 
@@ -223,6 +229,7 @@ func (b *builder) build() (Config, error) {
 		c.Mode = ModeFork
 		c.Fork = &b.exported.info
 	}
+	b.in.Reporter.Emit("lab.nodes", "Initializing validators", progress.Started)
 	for i := range b.in.Validators {
 		if _, err := b.cli.run("init "+nodeName(i), "init", nodeName(i), "--chain-id", c.ChainID, "--home", b.home(i)); err != nil {
 			return Config{}, err
@@ -236,8 +243,14 @@ func (b *builder) build() (Config, error) {
 			n.Validator = fmt.Sprintf("val%d", i)
 		}
 		c.Nodes = append(c.Nodes, n)
+		if b.in.Reporter != nil {
+			total := int64(b.in.Validators)
+			b.in.Reporter(progress.Event{Phase: "lab.nodes", Message: "Initializing validators", State: progress.Updated, Done: int64(i + 1), Total: &total, Unit: "nodes"})
+		}
 	}
 
+	b.in.Reporter.Emit("lab.nodes", "Validators initialized", progress.Completed)
+	b.in.Reporter.Emit("lab.keys", "Creating lab accounts", progress.Started)
 	mnemonics, err := b.addKeys(c.Mode)
 	if err != nil {
 		return Config{}, err
@@ -246,6 +259,8 @@ func (b *builder) build() (Config, error) {
 		c.Accounts = append(c.Accounts, Account{Name: m.Name, Address: m.Address})
 	}
 
+	b.in.Reporter.Emit("lab.keys", "Lab accounts created", progress.Completed)
+	b.in.Reporter.Emit("lab.genesis", "Preparing and validating genesis", progress.Started)
 	var g *genesis.Genesis
 	patches := genesis.JQPatcher(b.p.FreshPatches)
 	if c.Mode == ModeFork {
@@ -260,13 +275,21 @@ func (b *builder) build() (Config, error) {
 	if err := b.writeGenesis(g, string(c.Mode)+"_patches", patches); err != nil {
 		return Config{}, err
 	}
+	b.in.Reporter.Emit("lab.genesis", "Genesis validated", progress.Completed)
+	b.in.Reporter.Emit("lab.config", "Configuring validators", progress.Started)
 	if err := b.configure(c.Nodes); err != nil {
 		return Config{}, err
 	}
+	b.in.Reporter.Emit("lab.config", "Validators configured", progress.Completed)
+	b.in.Reporter.Emit("lab.save", "Saving lab configuration", progress.Started)
 	if err := supervisor.SaveNodes(b.partial, b.nodeSpecs(c.Nodes)); err != nil {
 		return Config{}, err
 	}
-	return c, Save(b.partial, c)
+	if err := Save(b.partial, c); err != nil {
+		return Config{}, err
+	}
+	b.in.Reporter.Emit("lab.save", "Lab configuration saved", progress.Completed)
+	return c, nil
 }
 
 // addKeys creates every lab key in the shared test keyring and saves the

@@ -21,6 +21,7 @@ func TestFixture(t *testing.T) {
 		t.Skip("fixture process only")
 	}
 	args := os.Args[slices.Index(os.Args, "--")+1:]
+	args = slices.DeleteFunc(args, func(s string) bool { return s == "--progress=json" })
 	code := fixture(strings.Join(args, " "))
 	os.Exit(code)
 }

@@ -2,22 +2,25 @@ package binary
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/kevinpita/forklab/internal/profile"
+	"github.com/kevinpita/forklab/internal/progress"
 )
 
 // buildGit shallow-fetches the ref into the scratch clone work,
 // builds there, and copies the output to dst. Fetching by ref instead of
 // clone --branch also accepts commit hashes on hosts that allow it.
-func buildGit(ctx context.Context, s profile.GitSource, v profile.Vars, work, dst string, log io.Writer) error {
+func buildGit(ctx context.Context, s profile.GitSource, v profile.Vars, work, dst string, log io.Writer, report progress.Reporter) error {
 	if err := os.Mkdir(work, 0o755); err != nil {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(work) }()
+	report.Emit("binary.git", "Fetching Git source", progress.Started)
 	env := map[string]string{"GIT_TERMINAL_PROMPT": "0"}
 	for _, args := range [][]string{
 		{"init", "-q"},
@@ -28,14 +31,29 @@ func buildGit(ctx context.Context, s profile.GitSource, v profile.Vars, work, ds
 			return err
 		}
 	}
-	return build(ctx, work, s.Build, s.Env, s.Out.Expand(v), dst, log)
+	report.Emit("binary.git", "Git source fetched", progress.Completed)
+	report.Emit("binary.build", "Building binary", progress.Started)
+	err := build(ctx, work, s.Build, s.Env, s.Out.Expand(v), dst, log)
+	if err == nil {
+		report.Emit("binary.build", "Binary built", progress.Completed)
+	}
+	return err
 }
 
-func buildSrc(ctx context.Context, s profile.SrcSource, v profile.Vars, dst string, log io.Writer) error {
+func (c Cache) buildSrc(ctx context.Context, s profile.SrcSource, v profile.Vars, dst string, log io.Writer) error {
 	dir, err := filepath.Abs(s.Dir.Expand(v))
 	if err != nil {
 		return err
 	}
+	physical, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return err
+	}
+	unlock, err := lock(ctx, filepath.Join(c.Dir, fmt.Sprintf(".checkout-%x.lock", sha256.Sum256([]byte(physical)))))
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	return build(ctx, dir, s.Build, s.Env, s.Out.Expand(v), dst, log)
 }
 

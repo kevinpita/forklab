@@ -38,7 +38,7 @@ func recipeEditorSpec(m *Model) *formSpec {
 		m.overlay = overlayRecipe
 		if m.recipe.Existing {
 			m.recipe.Busy = true
-			return m.exec(Command{"runbook", "show", m.recipe.Path}, false)
+			return m.exec(Command{"runbook", "show", m.recipe.Path}, false, 0)
 		}
 		return nil
 	}}

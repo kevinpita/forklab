@@ -97,11 +97,11 @@ func TestBinaryFetchListJSON(t *testing.T) {
 	want := binary.Binary{
 		Profile: "chain", Version: "1.2.3", Kind: binary.KindURL,
 		Source:          fetched.Data.Source,
-		Path:            filepath.Join(home, "bin", "chain", "1.2.3", "simd"),
+		Path:            fetched.Data.Path,
 		ReportedVersion: "v1.2.3", Check: binary.CheckMatched,
 		Size: fetched.Data.Size, ModTime: fetched.Data.ModTime,
 	}
-	if !fetched.OK || fetched.Data != want || !strings.HasPrefix(want.Source, srv.URL+"/simd_1.2.3_") {
+	if !strings.HasPrefix(fetched.Data.Path, filepath.Join(home, "bin", "chain")+string(filepath.Separator)) || filepath.Base(fetched.Data.Path) != "simd" || !fetched.OK || fetched.Data != want || !strings.HasPrefix(want.Source, srv.URL+"/simd_1.2.3_") {
 		t.Errorf("fetch = %+v, want %+v", fetched.Data, want)
 	}
 

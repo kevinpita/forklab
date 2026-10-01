@@ -129,8 +129,8 @@ func TestResolveURLFormats(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := filepath.Join(c.Dir, "chain", "1.2.3", "chaind")
-			if b.Path != want || b.Kind != KindURL || b.ReportedVersion != "1.2.3" || b.Check != CheckMatched {
+			want := filepath.Join(c.Dir, "chain")
+			if !strings.HasPrefix(b.Path, want+string(filepath.Separator)) || filepath.Base(b.Path) != "chaind" || b.Kind != KindURL || b.ReportedVersion != "1.2.3" || b.Check != CheckMatched {
 				t.Errorf("resolved %+v, want path %s matched 1.2.3", b, want)
 			}
 			if got := versionOf(t, b.Path); got != "1.2.3\n" {
@@ -213,7 +213,7 @@ func TestResolveNeverWritesArchivePaths(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if b.Path != filepath.Join(c.Dir, "chain", "1.2.3", "chaind") {
+			if !strings.HasPrefix(b.Path, filepath.Join(c.Dir, "chain")+string(filepath.Separator)) || filepath.Base(b.Path) != "chaind" {
 				t.Errorf("binary at %s, want inside the cache", b.Path)
 			}
 			for _, escaped := range []string{"evil", "chaind", "cache/evil", "cache/chaind"} {

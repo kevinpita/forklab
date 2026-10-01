@@ -20,6 +20,7 @@ import (
 	"github.com/kevinpita/forklab/internal/lab"
 	"github.com/kevinpita/forklab/internal/paths"
 	"github.com/kevinpita/forklab/internal/profile"
+	taskprogress "github.com/kevinpita/forklab/internal/progress"
 	"github.com/kevinpita/forklab/internal/snapshot"
 	"github.com/kevinpita/forklab/internal/supervisor"
 	"github.com/spf13/cobra"
@@ -105,18 +106,28 @@ func (v labView) WriteHuman(w io.Writer) error {
 
 func newLabCreateCmd(a *app) *cobra.Command {
 	var in lab.CreateInput
-	var profileName, fork string
+	var profileName, fork, progressFormat string
 	var keepWork bool
+	var binaries binaryFlags
 	cmd := &cobra.Command{
 		Use:   "create <name>",
 		Short: "Create a lab with a fresh genesis, or one forked from a snapshot",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if progressFormat != "" && progressFormat != "json" {
+				return output.Usagef("--progress must be json")
+			}
+			if progressFormat == "json" {
+				in.Reporter = taskprogress.JSON(cmd.ErrOrStderr())
+			}
 			s, err := profile.DefaultStore()
 			if err != nil {
 				return err
 			}
 			if in.Profile, err = s.Get(profileName); err != nil {
+				return err
+			}
+			if in.Profile, err = labProfile(in.Profile, binaries, in.Version); err != nil {
 				return err
 			}
 			p := in.Profile.Profile
@@ -143,6 +154,7 @@ func newLabCreateCmd(a *app) *cobra.Command {
 			}
 			if fork != "" {
 				vars := profile.Vars{Version: in.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, ChainID: in.ChainID}
+				in.Reporter.Emit("snapshot.resolve", "Resolving snapshot source", taskprogress.Started)
 				src, err := forkSource(p, fork, vars)
 				if err != nil {
 					return output.Usage(err)
@@ -154,17 +166,18 @@ func newLabCreateCmd(a *app) *cobra.Command {
 				if err := snapshot.Reachable(cmd.Context(), nil, src, filepath.Join(root, "snapshots")); err != nil {
 					return err
 				}
-				if !a.json {
+				in.Reporter.Emit("snapshot.resolve", "Snapshot source reachable", taskprogress.Completed)
+				if !a.json && in.Reporter == nil {
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "forking %s as chain %s (from %s)\n", src, in.ChainID, chainIDSource)
 				}
 				in.Fork = &lab.ForkInput{Source: fork, Export: func(ctx context.Context, bin string) (string, string, error) {
 					return exportSnapshot(ctx, a, cmd.ErrOrStderr(), root, src, snapshot.ExportInput{
-						Binary: bin, Version: in.Version, ChainID: in.ChainID, Args: expand(p.ExportArgs, vars), KeepWork: keepWork,
+						Reporter: in.Reporter, Binary: bin, Version: in.Version, ChainID: in.ChainID, Args: expand(p.ExportArgs, vars), KeepWork: keepWork,
 					})
 				}}
 			}
 			in.Binary = func(ctx context.Context) (string, error) {
-				b, err := resolveBinary(ctx, a, cmd.ErrOrStderr(), p, in.Version, binary.Options{})
+				b, err := resolveBinary(ctx, a, cmd.ErrOrStderr(), p, in.Version, binary.Options{Reporter: in.Reporter})
 				return b.Path, err
 			}
 			l, err := labs()
@@ -178,6 +191,8 @@ func newLabCreateCmd(a *app) *cobra.Command {
 			return a.print(cmd, labView{Config: c, Dir: dir, ChainIDSource: chainIDSource})
 		},
 	}
+	cmd.Flags().StringVar(&progressFormat, "progress", "", "live progress on stderr (json)")
+	binaries.register(cmd.Flags())
 	cmd.Flags().StringVar(&profileName, "profile", "", "profile name (required)")
 	cmd.Flags().StringVar(&in.Version, "version", "", "binary version every node starts with (required)")
 	cmd.Flags().IntVar(&in.Validators, "validators", 2, "number of validator nodes")
@@ -188,6 +203,58 @@ func newLabCreateCmd(a *app) *cobra.Command {
 	_ = cmd.MarkFlagRequired("profile")
 	_ = cmd.MarkFlagRequired("version")
 	return cmd
+}
+
+func labProfile(base profile.Entry, f binaryFlags, version string) (profile.Entry, error) {
+	hasFields := false
+	for i, specs := range f.binaryFields {
+		for _, spec := range specs {
+			hasFields = true
+			target, _, ok := strings.Cut(spec, "=")
+			if !ok || target != version {
+				return profile.Entry{}, output.Usagef("--%s must target --version %s", binaryFieldFlags[i].flag, version)
+			}
+		}
+	}
+	if len(f.binaries) == 0 {
+		if hasFields {
+			return profile.Entry{}, output.Usagef("binary metadata requires --binary for --version %s", version)
+		}
+		return base, nil
+	}
+	if len(f.binaries) != 1 {
+		return profile.Entry{}, output.Usagef("provide exactly one --binary for --version %s", version)
+	}
+	target, _, err := parseBinaryFlag(f.binaries[0])
+	if err != nil {
+		return profile.Entry{}, err
+	}
+	if target != version {
+		return profile.Entry{}, output.Usagef("--binary must target --version %s", version)
+	}
+	d := base.Snapshot()
+	d.Binaries = maps.Clone(d.Binaries)
+	if err := f.apply(&d); err != nil {
+		return profile.Entry{}, err
+	}
+	b := d.Binaries[version]
+	for _, location := range []*string{&b.Path, &b.Src} {
+		if *location == "" {
+			continue
+		}
+		absolute, err := paths.UserPath(*location)
+		if err != nil {
+			return profile.Entry{}, err
+		}
+		*location = absolute
+	}
+	d.Binaries[version] = b
+	p, err := d.Profile()
+	if err != nil {
+		return profile.Entry{}, withFlagHints(err)
+	}
+	base.Doc, base.Profile = d, p
+	return base, nil
 }
 
 // forkSource turns the --fork argument into a URL or an existing file: a
@@ -224,15 +291,43 @@ func exportSnapshot(ctx context.Context, a *app, stderr io.Writer, root, src str
 	var log io.Writer
 	bar := &progress{w: stderr, last: -1}
 	var onProgress snapshot.Progress
-	if !a.json {
+	if !a.json && in.Reporter == nil {
 		log, onProgress = stderr, bar.update
 	}
 	snapshots := filepath.Join(root, "snapshots")
-	archive, err = snapshot.Fetch(ctx, nil, src, snapshots, onProgress)
+	phase := "snapshot.fetch"
+	var message string
+	if snapshot.IsURL(src) {
+		if _, statErr := os.Stat(filepath.Join(snapshots, snapshot.Key(src))); statErr == nil {
+			message = "Reusing cached snapshot archive"
+		} else {
+			message = "Fetching snapshot archive"
+		}
+	} else {
+		message = "Using local snapshot archive"
+	}
+	in.Reporter.Emit(phase, message, taskprogress.Started)
+	previous := onProgress
+	downloaded := false
+	archive, err = snapshot.Fetch(ctx, nil, src, snapshots, func(done, total int64) {
+		if previous != nil {
+			previous(done, total)
+		}
+		downloaded = downloaded || done > 0
+		in.Reporter.Bytes(phase, "Downloading snapshot", done, total)
+	})
 	bar.end()
 	if err != nil {
 		return "", "", err
 	}
+	completed := "Local snapshot archive ready"
+	if snapshot.IsURL(src) {
+		completed = "Reused cached snapshot archive"
+		if downloaded {
+			completed = "Snapshot downloaded"
+		}
+	}
+	in.Reporter.Emit(phase, completed, taskprogress.Completed)
 	in.Archive, in.WorkDir, in.Log = archive, filepath.Join(snapshots, "work", snapshot.Key(src)), log
 	out, err := snapshot.Export(ctx, in)
 	if err != nil {

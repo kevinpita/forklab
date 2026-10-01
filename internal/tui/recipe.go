@@ -108,7 +108,7 @@ func (m *Model) saveRecipe() tea.Cmd {
 		return nil
 	}
 	r.Busy, r.Error, r.Notice = true, "", ""
-	return m.exec(r.saveCommand(), false)
+	return m.exec(r.saveCommand(), false, 0)
 }
 
 func (m *Model) runRecipe() tea.Cmd {

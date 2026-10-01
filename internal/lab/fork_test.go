@@ -70,7 +70,7 @@ func buildFork(t *testing.T, chainID string) (Config, string) {
 			return "/snapshots/mainnet.tar.lz4", "../genesis/testdata/simd_export.json", nil
 		}},
 	}
-	exported, err := loadExport(context.Background(), bin, *in.Fork)
+	exported, err := loadExport(context.Background(), bin, *in.Fork, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

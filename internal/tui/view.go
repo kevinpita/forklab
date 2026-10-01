@@ -485,7 +485,11 @@ func (m *Model) statusLine() string {
 		if n := len(m.running) - 1; n > 0 {
 			more = th.Dim.Render(fmt.Sprintf(" +%d more", n))
 		}
-		return th.Val.Render(spinFrame(m.spin)) + " " + th.FooterKey.Render("$ ") + th.Text.Render(r.cmd.String()) + took + more + m.quitNote()
+		activity := ""
+		if r.progress.current.Message != "" {
+			activity = th.Title.Render(r.progress.current.Message) + th.Dim.Render(" · ")
+		}
+		return th.Val.Render(spinFrame(m.spin)) + " " + activity + th.FooterKey.Render("$ ") + th.Text.Render(r.cmd.String()) + took + more + m.quitNote()
 	}
 	if m.last == nil {
 		return th.Dim.Render(" $ ready · every action runs a forklab command, c shows them")

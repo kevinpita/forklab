@@ -297,10 +297,10 @@ var listFlags = []struct{ prefix, flag string }{
 type docFlags struct {
 	exportArgs, freshPatches, forkPatches       []string
 	noExportArgs, noFreshPatches, noForkPatches bool
-	binaries, snapshots, extraPorts             []string
-	binaryFields                                [len(binaryFieldFlags)][]string
-	removeBinaries, removeSnapshots             []string
-	removeExtraPorts                            []string
+	snapshots, extraPorts                       []string
+	binaryFlags
+	removeBinaries, removeSnapshots []string
+	removeExtraPorts                []string
 }
 
 // Clearing a mode's corrections includes file filters. Preserve the other
@@ -344,10 +344,7 @@ func (f *docFlags) register(fs *pflag.FlagSet) {
 	fs.BoolVar(&f.noFreshPatches, "no-fresh-patches", false, "clear fresh_patches")
 	fs.StringArrayVar(&f.forkPatches, "fork-patch", nil, "gojq patch for forked genesis; repeat for each, replaces the list")
 	fs.BoolVar(&f.noForkPatches, "no-fork-patches", false, "clear fork_patches")
-	fs.StringArrayVar(&f.binaries, "binary", nil, "VERSION=KIND:LOCATION, KIND is url|path|git|src; replaces that version")
-	for i, b := range binaryFieldFlags {
-		fs.StringArrayVar(&f.binaryFields[i], b.flag, nil, b.usage)
-	}
+	f.binaryFlags.register(fs)
 	fs.StringArrayVar(&f.removeBinaries, "remove-binary", nil, "VERSION to remove")
 	fs.StringArrayVar(&f.snapshots, "snapshot", nil, "NAME=URL")
 	fs.StringArrayVar(&f.removeSnapshots, "remove-snapshot", nil, "NAME to remove")
@@ -390,31 +387,8 @@ func (f *docFlags) apply(fs *pflag.FlagSet, d *profile.Document) error {
 		}
 		delete(d.Binaries, v)
 	}
-	for _, spec := range f.binaries {
-		version, b, err := parseBinaryFlag(spec)
-		if err != nil {
-			return err
-		}
-		if d.Binaries == nil {
-			d.Binaries = map[string]profile.BinaryDocument{}
-		}
-		d.Binaries[version] = b
-	}
-	for i, field := range binaryFieldFlags {
-		for _, spec := range f.binaryFields[i] {
-			version, value, ok := strings.Cut(spec, "=")
-			if !ok {
-				return output.Usagef("--%s %q: want %s", field.flag, spec, field.usage)
-			}
-			b, found := d.Binaries[version]
-			if !found {
-				return output.Usagef("--%s %q: no binary %s in the profile", field.flag, spec, version)
-			}
-			if err := field.set(&b, value); err != nil {
-				return output.Usagef("--%s %q: %v", field.flag, spec, err)
-			}
-			d.Binaries[version] = b
-		}
+	if err := f.binaryFlags.apply(d); err != nil {
+		return err
 	}
 
 	for _, name := range f.removeSnapshots {
@@ -461,6 +435,48 @@ func (f *docFlags) apply(fs *pflag.FlagSet, d *profile.Document) error {
 			d.ExtraPorts[file] = map[string]int{}
 		}
 		d.ExtraPorts[file][key] = port
+	}
+	return nil
+}
+
+type binaryFlags struct {
+	binaries     []string
+	binaryFields [len(binaryFieldFlags)][]string
+}
+
+func (f *binaryFlags) register(fs *pflag.FlagSet) {
+	fs.StringArrayVar(&f.binaries, "binary", nil, "VERSION=KIND:LOCATION, KIND is url|path|git|src; replaces that version")
+	for i, b := range binaryFieldFlags {
+		fs.StringArrayVar(&f.binaryFields[i], b.flag, nil, b.usage)
+	}
+}
+
+func (f binaryFlags) apply(d *profile.Document) error {
+	for _, spec := range f.binaries {
+		version, b, err := parseBinaryFlag(spec)
+		if err != nil {
+			return err
+		}
+		if d.Binaries == nil {
+			d.Binaries = map[string]profile.BinaryDocument{}
+		}
+		d.Binaries[version] = b
+	}
+	for i, field := range binaryFieldFlags {
+		for _, spec := range f.binaryFields[i] {
+			version, value, ok := strings.Cut(spec, "=")
+			if !ok {
+				return output.Usagef("--%s %q: want %s", field.flag, spec, field.usage)
+			}
+			b, found := d.Binaries[version]
+			if !found {
+				return output.Usagef("--%s %q: no binary %s in the profile", field.flag, spec, version)
+			}
+			if err := field.set(&b, value); err != nil {
+				return output.Usagef("--%s %q: %v", field.flag, spec, err)
+			}
+			d.Binaries[version] = b
+		}
 	}
 	return nil
 }

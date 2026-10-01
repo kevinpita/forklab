@@ -167,7 +167,7 @@ func TestBuilderSaveBeforeRunAndBusyCommands(t *testing.T) {
 		t.Fatal("busy draft accepted an edit or another command")
 	}
 	press(m, "esc")
-	_ = m.applyAction(actionMsg{res: Result{Cmd: save}})
+	_ = m.applyAction(actionMsg{id: m.running[0].id, res: Result{Cmd: save}})
 	press(m, "ctrl+e")
 	if m.recipe.Busy || m.recipe.Dirty || !m.recipe.Existing {
 		t.Fatal("background save did not update the retained draft")

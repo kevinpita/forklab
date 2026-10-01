@@ -29,7 +29,8 @@ type profileDoc struct {
 		VotingPeriod          string `json:"voting_period"`
 		ExpeditedVotingPeriod string `json:"expedited_voting_period"`
 	} `json:"gov"`
-	Binaries map[string]map[string]any `json:"binaries"`
+	Binaries  map[string]map[string]any `json:"binaries"`
+	Snapshots map[string]string         `json:"snapshots"`
 }
 
 // scalar is the flag of each single-value profile field, and its value in
@@ -130,12 +131,7 @@ var profilesSource = &source{
 // version an upgrade rehearsal upgrades from.
 func profileVersions(key string, oldestFirst bool, kinds ...string) *source {
 	return &source{
-		cmd: func(v values) Command {
-			if v[key] == "" {
-				return nil
-			}
-			return Command{"profile", "show", v[key]}
-		},
+		cmd: profileCommand(key),
 		parse: func(data json.RawMessage, _ values) ([]option, error) {
 			var p struct {
 				Profile profileDoc `json:"profile"`
@@ -150,6 +146,56 @@ func profileVersions(key string, oldestFirst bool, kinds ...string) *source {
 			return opts, nil
 		},
 	}
+}
+
+func profileCommand(key string) func(values) Command {
+	return func(v values) Command {
+		if v[key] == "" {
+			return nil
+		}
+		return Command{"profile", "show", v[key]}
+	}
+}
+
+var profileChainID = &placeholderSource{
+	cmd:     profileCommand("profile"),
+	loading: "Profile (loading…)",
+	parse: func(data json.RawMessage) (string, error) {
+		var p struct {
+			Profile profileDoc `json:"profile"`
+		}
+		if err := json.Unmarshal(data, &p); err != nil {
+			return "", err
+		}
+		if p.Profile.ChainID == "" {
+			return "Profile (not set)", nil
+		}
+		return "Profile (" + p.Profile.ChainID + ")", nil
+	},
+}
+
+const customSnapshot = "custom"
+
+var profileSnapshots = &source{
+	cmd: profileCommand("profile"),
+	parse: func(data json.RawMessage, _ values) ([]option, error) {
+		var p struct {
+			Profile profileDoc `json:"profile"`
+		}
+		if err := json.Unmarshal(data, &p); err != nil {
+			return nil, err
+		}
+		names := make([]string, 0, len(p.Profile.Snapshots))
+		for name := range p.Profile.Snapshots {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		opts := make([]option, 0, len(names)+1)
+		for _, name := range names {
+			opts = append(opts, option{value: "named:" + name, label: name})
+		}
+		return append(opts, option{value: customSnapshot, label: "Custom URL or file"}), nil
+	},
 }
 
 // activeLab is the lab commands act on by default: the running one, else
@@ -345,15 +391,32 @@ func labCreateSpec(m *Model, wizard bool) *formSpec {
 	}
 	fields := []fieldSpec{
 		{key: "profile", label: "Profile", kind: fieldSelect, src: profilesSource, hint: "the chain to run"},
-		{key: "version", label: "Version", kind: fieldSelect, src: profileVersions("profile", true), hint: "binary every node starts with"},
+		{
+			key: "bin-kind", label: "Binary source", kind: fieldSelect, listChoices: true, def: "profile", options: labBinaryOptions,
+			choiceHints: map[string]string{
+				"profile": "Choose a version configured in this profile.",
+				"path":    "Use an already built binary on your machine.",
+				"url":     "Download a binary or archive from a URL.",
+				"git":     "Clone a repository, then build its code.",
+				"src":     "Build code in a source folder on this machine.",
+			},
+		},
+		{key: "version", label: "Version", kind: fieldSelect, src: profileVersions("profile", true), show: has("bin-kind", "profile"), hint: "configured profile version"},
+	}
+	fields = append(fields, binarySourceFields(false)...)
+	fields = append(fields, []fieldSpec{
 		{key: "validators", label: "Validators", kind: fieldNumber, def: "2"},
 		{
 			key: "mode", label: "Genesis", kind: fieldSelect, def: "fresh",
 			options: []option{{"fresh", "fresh genesis"}, {"fork", "fork a snapshot"}},
 		},
-		{key: "snapshot", label: "Snapshot", kind: fieldText, show: has("mode", "fork"), hint: "profile snapshot name, URL, or .tar.lz4|gz|zst file"},
-		{key: "chain-id", label: "Chain ID", kind: fieldText, optional: true, placeholder: "the profile's", check: checkName},
-	}
+		{key: "snapshot-source", label: "Snapshot", kind: fieldSelect, listChoices: true, src: profileSnapshots, show: has("mode", "fork"), hint: "Choose a profile snapshot or use your own URL or archive."},
+		{key: "snapshot", label: "URL or file", kind: fieldText, show: func(v values) bool {
+			return v["mode"] == "fork" && (v["snapshot-source"] == "" || v["snapshot-source"] == customSnapshot)
+		}, hint: "URL or local .tar.lz4, .tar.gz, or .tar.zst archive"},
+		{key: "chain-id", label: "Chain ID", kind: fieldText, optional: true, placeholder: "Profile (unavailable)", placeholderFrom: profileChainID, check: checkName},
+	}...)
+
 	if wizard {
 		name.def = "devnet"
 		fields = append(fields, name)
@@ -371,9 +434,17 @@ func labCreateSpec(m *Model, wizard bool) *formSpec {
 	return &formSpec{
 		title: title, fields: fields, stepped: wizard,
 		build: func(v values) Command {
-			c := Command{"lab", "create", v["name"], "--profile", v["profile"], "--version", v["version"], "--validators", v["validators"]}
+			version := v["version"]
+			if v["bin-kind"] != "profile" {
+				version = v["bin-version"]
+			}
+			c := appendBinary(Command{"lab", "create", v["name"], "--profile", v["profile"], "--version", version, "--validators", v["validators"]}, v)
 			if v["mode"] == "fork" {
-				c = append(c, "--fork", v["snapshot"])
+				snapshot := v["snapshot"]
+				if name, ok := strings.CutPrefix(v["snapshot-source"], "named:"); ok {
+					snapshot = name
+				}
+				c = append(c, "--fork", snapshot)
 			}
 			if v["chain-id"] != "" {
 				c = append(c, "--chain-id", v["chain-id"])
@@ -389,21 +460,59 @@ func labCreateSpec(m *Model, wizard bool) *formSpec {
 	}
 }
 
-// profileBinaryFields add or replace one binary version of a profile.
-var profileBinaryFields = []fieldSpec{
-	{key: "bin-version", label: "Add binary", kind: fieldText, optional: true, placeholder: "version, such as 0.53.8", hint: "adds or replaces this version"},
-	{
-		key: "bin-kind", label: "Source", kind: fieldSelect, def: "path", show: set("bin-version"),
-		options: []option{{"path", "path  an existing binary"}, {"url", "url  download"}, {"git", "git  clone and build"}, {"src", "src  local checkout"}},
-	},
-	{key: "bin-location", label: "Location", kind: fieldText, show: set("bin-version"), hint: "file path, URL, or repository"},
+var customBinaryOptions = []option{
+	{"path", "Use a binary file"},
+	{"url", "Download from a URL"},
+	{"git", "Build from Git"},
+	{"src", "Build local source"},
 }
 
+var labBinaryOptions = append([]option{{"profile", "Use a profile version"}}, customBinaryOptions...)
+
+func binarySourceFields(optional bool) []fieldSpec {
+	active := func(v values) bool { return v["bin-kind"] != "profile" && (!optional || v["bin-version"] != "") }
+	kind := func(kinds ...string) func(values) bool {
+		return func(v values) bool { return active(v) && slices.Contains(kinds, v["bin-kind"]) }
+	}
+	version := fieldSpec{key: "bin-version", label: "Binary version", kind: fieldText, optional: optional, placeholder: "version, such as 0.53.8", hint: "expected version reported by the binary", show: active}
+	if optional {
+		version.label, version.show, version.hint = "Add binary", nil, "adds or replaces this version"
+	}
+	return []fieldSpec{
+		version,
+		{key: "bin-location", label: "Binary file", kind: fieldText, show: kind("path"), hint: "absolute, relative, or ~/ path to the executable"},
+		{key: "bin-location", label: "Download URL", kind: fieldText, show: kind("url"), hint: "binary or archive URL; supports {version}, {os}, {arch}"},
+		{key: "bin-location", label: "Repository URL", kind: fieldText, show: kind("git"), hint: "Git repository to clone and build"},
+		{key: "bin-location", label: "Source folder", kind: fieldText, show: kind("src"), hint: "absolute, relative, or ~/ path to your source directory"},
+		{key: "bin-ref", label: "Git ref", kind: fieldText, show: kind("git"), hint: "branch, tag, or commit to build"},
+		{key: "bin-build", label: "Build command", kind: fieldText, show: kind("git", "src"), hint: "shell command run in the checkout, such as make build"},
+		{key: "bin-out", label: "Output path", kind: fieldText, show: kind("git", "src"), hint: "built executable path relative to the checkout"},
+	}
+}
+
+var profileBinaryFields = func() []fieldSpec {
+	fields := binarySourceFields(true)
+	source := fieldSpec{key: "bin-kind", label: "Source", kind: fieldSelect, def: "path", show: set("bin-version"), options: customBinaryOptions}
+	return append([]fieldSpec{fields[0], source}, fields[1:]...)
+}()
+
 func appendBinary(c Command, v values) Command {
-	if v["bin-version"] == "" {
+	version, kind := v["bin-version"], v["bin-kind"]
+	if version == "" || kind == "profile" {
 		return c
 	}
-	return append(c, "--binary", v["bin-version"]+"="+v["bin-kind"]+":"+v["bin-location"])
+	c = append(c, "--binary", version+"="+kind+":"+v["bin-location"])
+	if kind == "git" && v["bin-ref"] != "" {
+		c = append(c, "--binary-ref", version+"="+v["bin-ref"])
+	}
+	if kind == "git" || kind == "src" {
+		for _, key := range []string{"build", "out"} {
+			if v["bin-"+key] != "" {
+				c = append(c, "--binary-"+key, version+"="+v["bin-"+key])
+			}
+		}
+	}
+	return c
 }
 
 func profileCreateSpec(m *Model) *formSpec {

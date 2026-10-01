@@ -2,12 +2,15 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
+	"math/big"
 	"slices"
 	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // A form collects the arguments of one forklab command. Its spec is data:
@@ -32,15 +35,24 @@ type source struct {
 	parse func(data json.RawMessage, v values) ([]option, error)
 }
 
+type placeholderSource struct {
+	cmd     func(values) Command
+	parse   func(json.RawMessage) (string, error)
+	loading string
+}
+
 type fieldSpec struct {
 	key, label, hint string
 	kind             fieldKind
 	// def is the starting value; a select keeps it once its options load.
-	def         string
-	options     []option
-	src         *source
-	optional    bool
-	placeholder string
+	def             string
+	options         []option
+	choiceHints     map[string]string
+	src             *source
+	optional        bool
+	listChoices     bool
+	placeholder     string
+	placeholderFrom *placeholderSource
 	// show hides the field unless it holds for the values before it.
 	show  func(v values) bool
 	check func(s string, v values) string
@@ -84,11 +96,13 @@ type form struct {
 	fields []field
 	focus  int
 	// step is the stepped form's position; len(visible) is the review.
-	step    int
-	loads   map[string]*optionLoad
-	running Command
-	started time.Time
-	err     error
+	step     int
+	loads    map[string]*optionLoad
+	action   int
+	progress actionProgress
+	running  Command
+	started  time.Time
+	err      error
 }
 
 type formOptionsMsg struct {
@@ -234,6 +248,28 @@ func (f *form) optionState(fl *field, v values) *optionLoad {
 	return f.loads[c.String()]
 }
 
+func (f *form) placeholder(fl *field, v values) string {
+	if fl.placeholderFrom == nil {
+		return fl.placeholder
+	}
+	c := fl.placeholderFrom.cmd(v)
+	if c == nil {
+		return fl.placeholder
+	}
+	st := f.loads[c.String()]
+	if st == nil || !st.done {
+		return fl.placeholderFrom.loading
+	}
+	if st.err != nil {
+		return fl.placeholder
+	}
+	text, err := fl.placeholderFrom.parse(st.data)
+	if err != nil {
+		return fl.placeholder
+	}
+	return text
+}
+
 // command is the argv the form runs now. An empty required field shows as
 // its key in capitals, so the preview reads like a usage line.
 func (f *form) command() Command {
@@ -267,6 +303,9 @@ func (f *form) valid() bool {
 func (f *form) setFocus(i int) {
 	f.fields[f.focus].input.Blur()
 	f.focus = i
+	if f.spec.stepped {
+		f.step = max(slices.Index(f.visible(), i), 0)
+	}
 	f.focusInput()
 }
 
@@ -290,31 +329,9 @@ func (f *form) move(delta int) {
 	f.setFocus(vis[(at+delta+len(vis))%len(vis)])
 }
 
-// stepCount counts the fields every run asks plus the review; a field shown
-// only for some choice shares the step of the field before it, so the total
-// never changes as choices do.
-func (f *form) stepCount() int {
-	n := 1
-	for _, fl := range f.fields {
-		if fl.show == nil {
-			n++
-		}
-	}
-	return n
-}
+func (f *form) stepCount() int { return len(f.visible()) + 1 }
 
-func (f *form) stepNumber() int {
-	n := 0
-	for _, i := range f.visible() {
-		if f.fields[i].show == nil {
-			n++
-		}
-		if i == f.focus {
-			break
-		}
-	}
-	return max(n, 1)
-}
+func (f *form) stepNumber() int { return max(slices.Index(f.visible(), f.focus)+1, 1) }
 
 // reviewing is true on the stepped form's last step.
 func (f *form) reviewing() bool { return f.spec.stepped && f.step >= len(f.visible()) }
@@ -340,11 +357,14 @@ func (f *form) advance() bool {
 	if f.problem(f.focus, f.values()) != "" {
 		return false
 	}
-	f.step++
+	f.step = slices.Index(f.visible(), f.focus) + 1
 	if vis := f.visible(); f.step < len(vis) {
 		f.setFocus(vis[f.step])
 	} else {
-		f.fields[f.focus].input.Blur()
+		if f.valid() {
+			f.step = len(f.visible())
+			f.fields[f.focus].input.Blur()
+		}
 	}
 	return false
 }
@@ -364,6 +384,15 @@ func (f *form) cycle(delta int) {
 		return
 	}
 	switch fl.kind {
+	case fieldNumber:
+		n := new(big.Int)
+		n.SetString(fl.value(), 10)
+		n.Sub(n, big.NewInt(int64(delta)))
+		if n.Sign() < 1 {
+			n.SetInt64(1)
+		}
+		fl.input.SetValue(n.String())
+		fl.input.CursorEnd()
 	case fieldToggle:
 		fl.on = !fl.on
 	case fieldSelect:
@@ -378,6 +407,16 @@ func (f *form) cycle(delta int) {
 // the loads it lacks. A select keeps its value when the new options have it.
 func (f *form) sync(run func(Command) tea.Cmd) tea.Cmd {
 	var cmds []tea.Cmd
+	load := func(c Command) *optionLoad {
+		key := c.String()
+		st := f.loads[key]
+		if st == nil {
+			st = &optionLoad{}
+			f.loads[key] = st
+			cmds = append(cmds, run(c))
+		}
+		return st
+	}
 	for pass := 0; pass < len(f.fields); pass++ {
 		changed := false
 		v := values{}
@@ -388,13 +427,7 @@ func (f *form) sync(run func(Command) tea.Cmd) tea.Cmd {
 			}
 			if fl.src != nil {
 				if c := fl.src.cmd(v); c != nil {
-					key := c.String()
-					st := f.loads[key]
-					if st == nil {
-						st = &optionLoad{}
-						f.loads[key] = st
-						cmds = append(cmds, run(c))
-					}
+					st := load(c)
 					if st.done {
 						want := fl.value()
 						var opts []option
@@ -405,11 +438,20 @@ func (f *form) sync(run func(Command) tea.Cmd) tea.Cmd {
 							fl.opts, fl.choice = opts, optionIndex(opts, want)
 							changed = true
 						}
+					} else if len(fl.opts) > 0 {
+						fl.opts, fl.choice = nil, 0
+						changed = true
 					}
 				} else if len(fl.opts) > 0 {
 					fl.opts, fl.choice = nil, 0
 					changed = true
 				}
+			}
+			if fl.placeholderFrom != nil {
+				if c := fl.placeholderFrom.cmd(v); c != nil {
+					load(c)
+				}
+				fl.input.Placeholder = f.placeholder(fl, v)
 			}
 			if s := fl.value(); s != "" {
 				v[fl.key] = s
@@ -418,6 +460,10 @@ func (f *form) sync(run func(Command) tea.Cmd) tea.Cmd {
 		if !changed {
 			break
 		}
+	}
+	vis := f.visible()
+	if !slices.Contains(vis, f.focus) {
+		f.setFocus(vis[0])
 	}
 	return tea.Batch(cmds...)
 }
@@ -476,6 +522,18 @@ func (m *Model) formKey(msg tea.Msg) tea.Cmd {
 	if f.running != nil || fl == nil || (fl.kind != fieldText && fl.kind != fieldNumber) {
 		return nil
 	}
+	if fl.kind == fieldNumber {
+		var text string
+		switch msg := msg.(type) {
+		case tea.KeyPressMsg:
+			text = msg.Text
+		case tea.PasteMsg:
+			text = msg.Content
+		}
+		if strings.Trim(text, "0123456789") != "" {
+			return nil
+		}
+	}
 	var cmd tea.Cmd
 	fl.input, cmd = fl.input.Update(msg)
 	return tea.Batch(cmd, m.syncForm())
@@ -483,6 +541,17 @@ func (m *Model) formKey(msg tea.Msg) tea.Cmd {
 
 func (m *Model) formCycle(delta int) tea.Cmd {
 	m.form.cycle(delta)
+	return m.syncForm()
+}
+
+func (m *Model) formNext() tea.Cmd {
+	if m.form.spec.stepped {
+		if !m.form.reviewing() {
+			m.form.advance()
+		}
+	} else {
+		m.form.move(1)
+	}
 	return m.syncForm()
 }
 
@@ -502,7 +571,8 @@ func (m *Model) formSubmit() tea.Cmd {
 	}
 	c := f.command()
 	f.running, f.started, f.err = c, time.Now(), nil
-	return m.exec(c, f.spec.show)
+	f.progress = actionProgress{}
+	return m.exec(c, f.spec.show, f.id)
 }
 
 // closeForm cancels an idle form; a running one keeps running in the
@@ -519,9 +589,10 @@ func (m *Model) closeForm() tea.Cmd {
 }
 
 // formDone routes a finished command to the form that ran it.
-func (m *Model) formDone(res Result) {
+func (m *Model) formDone(msg actionMsg) {
+	res := msg.res
 	f := m.form
-	if f == nil || f.running == nil || f.running.String() != res.Cmd.String() {
+	if f == nil || f.running == nil || f.id != msg.form || f.action != msg.id {
 		return
 	}
 	f.running = nil
@@ -531,6 +602,9 @@ func (m *Model) formDone(res Result) {
 	}
 	if res.Err != nil {
 		f.err = res.Err
+		if f.progress.current.Message != "" {
+			f.err = fmt.Errorf("%s: %w", f.progress.current.Message, res.Err)
+		}
 		return
 	}
 	v := f.values()
@@ -551,6 +625,14 @@ func formOnChoice(m *Model) bool {
 	}
 	fl := m.form.focused()
 	return fl != nil && (fl.kind == fieldSelect || fl.kind == fieldToggle)
+}
+
+func formOnAdjustable(m *Model) bool {
+	if !formIdle(m) {
+		return false
+	}
+	fl := m.form.focused()
+	return fl != nil && (fl.kind == fieldNumber || fl.kind == fieldSelect || fl.kind == fieldToggle)
 }
 
 // View
@@ -580,7 +662,31 @@ func (m *Model) formView() []string {
 			mark, ls = th.Accent2.Render("› "), th.Title
 			focusLine = len(lines)
 		}
-		lines = append(lines, " "+mark+ls.Render(label)+m.fieldWidget(fl, i == f.focus && !f.reviewing()))
+		if fl.listChoices && f.spec.stepped && i == f.focus && !f.reviewing() {
+			lines = append(lines, " "+th.Title.Render(fl.label))
+			if len(fl.opts) == 0 {
+				lines = append(lines, "   "+m.fieldWidget(fl, true))
+			}
+			for k, choice := range fl.opts {
+				marker, style := "  ", th.Text
+				if k == fl.choice {
+					marker, style = "› ", th.Sel
+					focusLine = len(lines)
+				}
+				lines = append(lines, " "+style.Render(marker+choice.label))
+			}
+			hint := fl.choiceHints[fl.value()]
+			if hint == "" {
+				hint = fl.hint
+			}
+			if hint != "" {
+				for _, line := range wrapWords(hint, max(inner-4, 1)) {
+					lines = append(lines, "   "+th.Dim.Render(line))
+				}
+			}
+		} else {
+			lines = append(lines, " "+mark+ls.Render(label)+m.fieldWidget(fl, i == f.focus && !f.reviewing()))
+		}
 		prob := ""
 		if fl.touched {
 			prob = f.problem(i, v)
@@ -588,13 +694,15 @@ func (m *Model) formView() []string {
 		switch {
 		case prob != "":
 			lines = append(lines, "   "+strings.Repeat(" ", formLabelW-2)+th.Bad.Render("✗ "+prob))
-		case i == f.focus && fl.hint != "":
+		case i == f.focus && fl.hint != "" && !fl.listChoices:
 			lines = append(lines, "   "+strings.Repeat(" ", formLabelW-2)+th.Dim.Render(fl.hint))
 		}
 	}
 	vis := f.visible()
 	right := ""
 	switch {
+	case f.running != nil && labCreate(f.running):
+		right = "creating lab"
 	case f.reviewing():
 		right = "step " + itoa(f.stepCount()) + " of " + itoa(f.stepCount()) + " · review"
 		lines = append(lines, " "+th.Title.Render("Review"), "")
@@ -605,7 +713,11 @@ func (m *Model) formView() []string {
 				val = fl.opts[min(fl.choice, len(fl.opts)-1)].label
 			}
 			if val == "" {
-				val = th.Dim.Render("(default)")
+				val = "(default)"
+				if fl.placeholderFrom != nil {
+					val = f.placeholder(fl, v)
+				}
+				val = th.Dim.Render(val)
 			}
 			lines = append(lines, "   "+th.Key.Render(padRight(fl.label, formLabelW-2))+th.Text.Render(val))
 		}
@@ -620,6 +732,9 @@ func (m *Model) formView() []string {
 	// Keep the focused field in view when the fields outgrow the screen.
 	tail := m.formTail(inner)
 	room := max(m.bodyH()-2-len(tail), 1)
+	if f.running != nil && labCreate(f.running) {
+		lines = m.progressLines(inner, room)
+	}
 	if len(lines) > room {
 		start := min(max(focusLine-room/2, 0), len(lines)-room)
 		lines = lines[start : start+room]
@@ -631,7 +746,8 @@ func (m *Model) formView() []string {
 // fields.
 func (m *Model) formTail(inner int) []string {
 	f, th := m.form, m.th
-	out := []string{th.Border.Render(strings.Repeat("─", inner))}
+	label := ansi.Truncate("─ Command preview ", inner, "")
+	out := []string{th.Dim.Render(label) + th.Border.Render(strings.Repeat("─", max(inner-ansi.StringWidth(label), 0)))}
 	cmd := f.command().String()
 	if f.running != nil {
 		cmd = f.running.String()
@@ -639,20 +755,58 @@ func (m *Model) formTail(inner int) []string {
 	for i, l := range wrapWords("$ "+cmd, max(inner-3, 1)) {
 		if i == 0 {
 			l = strings.TrimPrefix(l, "$ ")
-			out = append(out, " "+th.FooterKey.Render("$ ")+th.Val.Render(l))
+			out = append(out, " "+th.Dim.Render("$ "+l))
 			continue
 		}
-		out = append(out, "   "+th.Val.Render(l))
+		out = append(out, "   "+th.Dim.Render(l))
 	}
 	switch {
 	case f.running != nil:
-		out = append(out, " "+th.Val.Render(spinFrame(m.spin))+" "+th.Text.Render("running "+fmtDur(time.Since(f.started).Round(time.Second)))+
-			th.Dim.Render(" · esc keeps it running in the background"))
+		if labCreate(f.running) {
+			for _, line := range wrapWords("Esc keeps it running in the background", max(inner-2, 1)) {
+				out = append(out, " "+th.Dim.Render(line))
+			}
+		} else {
+			out = append(out, " "+th.Val.Render(spinFrame(m.spin))+" "+th.Text.Render("running "+fmtDur(time.Since(f.started).Round(time.Second)))+th.Dim.Render(" · esc keeps it running in the background"))
+		}
 	case f.err != nil:
 		ls := wrapWords("✗ "+oneLine(f.err.Error()), max(inner-2, 1))
 		for _, l := range ls[:min(len(ls), 3)] {
 			out = append(out, " "+th.Bad.Render(l))
 		}
+	}
+	if f.running == nil {
+		action := "run"
+		if f.spec.stepped {
+			action = "next"
+		}
+		hints := []struct{ key, action string }{{"Enter", action}, {"Tab", "next"}, {"Shift+Tab", "back"}, {"Esc", "cancel"}}
+		if f.reviewing() {
+			hints[0].action = "create lab"
+			hints = append(hints[:1], hints[2:]...)
+		} else if fl := f.focused(); fl != nil && (fl.kind == fieldSelect || fl.kind == fieldToggle) {
+			hints = append([]struct{ key, action string }{{"↑↓", "choose"}}, hints...)
+		} else if fl := f.focused(); fl != nil && fl.kind == fieldNumber {
+			hints = append([]struct{ key, action string }{{"↑↓", "adjust"}}, hints...)
+		}
+		width := max(inner-2, 1)
+		line := ""
+		for _, hint := range hints {
+			group := th.Title.Render(hint.key) + th.Dim.Render(" "+hint.action)
+			if line != "" && ansi.StringWidth(line)+3+ansi.StringWidth(group) > width {
+				out = append(out, " "+line)
+				line = ""
+			}
+			parts := wrapWords(group, width)
+			for _, part := range parts[:len(parts)-1] {
+				out = append(out, " "+part)
+			}
+			if line != "" {
+				line += th.Dim.Render(" · ")
+			}
+			line += parts[len(parts)-1]
+		}
+		out = append(out, " "+line)
 	}
 	return out
 }

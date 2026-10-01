@@ -178,22 +178,26 @@ func TestCancelMidBuildKillsTheProcessGroup(t *testing.T) {
 	}
 }
 
-func TestResolveSweepsCrashLeftovers(t *testing.T) {
+func TestResolveSweepsOnlyItsOwnCrashLeftovers(t *testing.T) {
 	srv, _ := serve(t, script("1.2.3\n"))
 	c := Cache{Dir: t.TempDir()}
-	parent := filepath.Join(c.Dir, "chain")
-	for _, d := range []string{".stage-1.2.3", ".work-1.2.3", ".old-1.2.3", ".stage-1.2.3-rc1"} {
-		if err := os.MkdirAll(filepath.Join(parent, d, "half"), 0o755); err != nil {
+	p := chainProfile("1.2.3", profile.URLSource{URL: profile.Template(srv.URL + "/chaind")})
+	b, err := c.Resolve(t.Context(), p, "1.2.3", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, slot := filepath.Dir(filepath.Dir(b.Path)), filepath.Base(filepath.Dir(b.Path))
+	for _, name := range []string{".stage-" + slot, ".work-" + slot, ".old-" + slot, ".stage-1.2.3"} {
+		if err := os.MkdirAll(filepath.Join(parent, name, "half"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	p := chainProfile("1.2.3", profile.URLSource{URL: profile.Template(srv.URL + "/chaind")})
-	if _, err := c.Resolve(context.Background(), p, "1.2.3", Options{}); err != nil {
+	if _, err := c.Resolve(t.Context(), p, "1.2.3", Options{}); err != nil {
 		t.Fatal(err)
 	}
 	left := scratchDirs(t, parent)
-	if len(left) != 1 || filepath.Base(left[0]) != ".stage-1.2.3-rc1" {
-		t.Errorf("after resolve scratch = %v, want only the other version's stage", left)
+	if len(left) != 1 || filepath.Base(left[0]) != ".stage-1.2.3" {
+		t.Fatalf("left %v, want legacy scratch unchanged", left)
 	}
 }
 

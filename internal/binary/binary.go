@@ -1,7 +1,7 @@
 // Package binary resolves a profile's binary version to an executable on
 // disk, downloading or building it into a cache when needed.
 //
-// The cache holds <dir>/<profile>/<version>/ with the binary and a meta.json
+// The cache holds <dir>/<profile>/<version-source-digest>/ with the binary and a meta.json
 // describing it. A version directory is staged next to its final place and
 // renamed in whole, so it either exists complete or not at all.
 package binary
@@ -9,6 +9,7 @@ package binary
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,7 +24,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kevinpita/forklab/internal/paths"
 	"github.com/kevinpita/forklab/internal/profile"
+	"github.com/kevinpita/forklab/internal/progress"
 )
 
 type Kind string
@@ -72,6 +75,7 @@ type Binary struct {
 }
 
 type Options struct {
+	Reporter progress.Reporter
 	// NoVerify accepts a binary whose reported version differs. The
 	// acceptance is stored, so later calls without NoVerify reuse the binary
 	// until its file changes; this holds for path sources too.
@@ -92,23 +96,40 @@ type Cache struct {
 const metaFile = "meta.json"
 
 // Resolve returns the binary for version of p, fetching or building it into
-// the cache on first use. Calls for the same profile and version, in any
-// process, run one at a time; the later ones find the cached result.
+// the cache on first use. Calls for the same profile, version, and source configuration,
+// in any process, run one at a time; later calls find the cached result.
 func (c Cache) Resolve(ctx context.Context, p profile.Profile, version string, o Options) (Binary, error) {
+	o.Reporter.Emit("binary.resolve", "Checking binary cache", progress.Started)
 	src, ok := p.Binaries[version]
 	if !ok {
 		return Binary{}, fmt.Errorf("profile %s has no binary version %s", p.Name, version)
 	}
 	vars := profile.Vars{Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH, ChainID: p.ChainID}
+	switch s := src.(type) {
+	case profile.PathSource:
+		path, err := paths.UserPath(s.Path.Expand(vars))
+		if err != nil {
+			return Binary{}, err
+		}
+		src = profile.PathSource{Path: profile.Template(path)}
+	case profile.SrcSource:
+		dir, err := paths.UserPath(s.Dir.Expand(vars))
+		if err != nil {
+			return Binary{}, err
+		}
+		s.Dir = profile.Template(dir)
+		src = s
+	}
 	b := Binary{Profile: p.Name, Version: version}
 	b.Kind, b.Source = describe(src, vars)
 
 	parent := filepath.Join(c.Dir, p.Name)
-	dir := filepath.Join(parent, version)
+	slot := sourceSlot(p, version, src, vars)
+	dir := filepath.Join(parent, slot)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return Binary{}, err
 	}
-	unlock, err := lock(ctx, filepath.Join(parent, "."+version+".lock"))
+	unlock, err := lock(ctx, filepath.Join(parent, "."+slot+".lock"))
 	if err != nil {
 		return Binary{}, err
 	}
@@ -116,7 +137,7 @@ func (c Cache) Resolve(ctx context.Context, p profile.Profile, version string, o
 
 	// Under the lock no other resolve owns these, so any that exist were
 	// left by a crash.
-	stage, work, old := filepath.Join(parent, ".stage-"+version), filepath.Join(parent, ".work-"+version), filepath.Join(parent, ".old-"+version)
+	stage, work, old := filepath.Join(parent, ".stage-"+slot), filepath.Join(parent, ".work-"+slot), filepath.Join(parent, ".old-"+slot)
 	for _, d := range []string{stage, work, old} {
 		if err := os.RemoveAll(d); err != nil {
 			return Binary{}, err
@@ -125,10 +146,12 @@ func (c Cache) Resolve(ctx context.Context, p profile.Profile, version string, o
 
 	if !o.Rebuild {
 		if cached, err := readMeta(dir); err == nil && cached.Kind == b.Kind && cached.Source == b.Source && unchanged(cached) {
+			o.Reporter.Emit("binary.resolve", "Reused cached binary", progress.Completed)
 			return cached, nil
 		}
 	}
 
+	o.Reporter.Emit("binary.resolve", "Binary source resolved", progress.Completed)
 	if err := os.Mkdir(stage, 0o755); err != nil {
 		return Binary{}, err
 	}
@@ -138,14 +161,28 @@ func (c Cache) Resolve(ctx context.Context, p profile.Profile, version string, o
 	b.Path = filepath.Join(dir, p.BinaryName)
 	switch s := src.(type) {
 	case profile.URLSource:
-		err = fetch(ctx, b.Source, p.BinaryName, stage, staged, o.Progress)
+		o.Reporter.Emit("binary.download", "Downloading binary", progress.Started)
+		previous := o.Progress
+		err = fetch(ctx, b.Source, p.BinaryName, stage, staged, func(done, total int64) {
+			if previous != nil {
+				previous(done, total)
+			}
+			o.Reporter.Bytes("binary.download", "Downloading binary", done, total)
+		})
+		if err == nil {
+			o.Reporter.Emit("binary.download", "Binary downloaded", progress.Completed)
+		}
 	case profile.PathSource:
 		staged, err = filepath.Abs(b.Source)
 		b.Path = staged
 	case profile.GitSource:
-		err = buildGit(ctx, s, vars, work, staged, o.BuildLog)
+		err = buildGit(ctx, s, vars, work, staged, o.BuildLog, o.Reporter)
 	case profile.SrcSource:
-		err = buildSrc(ctx, s, vars, staged, o.BuildLog)
+		o.Reporter.Emit("binary.build", "Building local binary", progress.Started)
+		err = c.buildSrc(ctx, s, vars, staged, o.BuildLog)
+		if err == nil {
+			o.Reporter.Emit("binary.build", "Local binary built", progress.Completed)
+		}
 	}
 	if err == nil {
 		err = isExecutable(staged)
@@ -154,6 +191,7 @@ func (c Cache) Resolve(ctx context.Context, p profile.Profile, version string, o
 		return Binary{}, fmt.Errorf("%s %s %s: %w", p.Name, version, b.Kind, err)
 	}
 
+	o.Reporter.Emit("binary.verify", "Verifying binary", progress.Started)
 	b.ReportedVersion, b.Check, err = verify(ctx, staged, p.BinaryName, version, b.Kind, o.NoVerify)
 	if err != nil {
 		return Binary{}, fmt.Errorf("%s %s: %w", p.Name, version, err)
@@ -170,7 +208,31 @@ func (c Cache) Resolve(ctx context.Context, p profile.Profile, version string, o
 	if err := os.WriteFile(filepath.Join(stage, metaFile), append(data, '\n'), 0o644); err != nil {
 		return Binary{}, err
 	}
-	return b, commit(stage, dir, old)
+	if err := commit(stage, dir, old); err != nil {
+		return Binary{}, err
+	}
+	o.Reporter.Emit("binary.verify", "Binary verified and ready", progress.Completed)
+	return b, nil
+}
+
+func sourceSlot(p profile.Profile, version string, src profile.Source, vars profile.Vars) string {
+	concrete := profile.BinaryDocument{}
+	switch s := src.(type) {
+	case profile.URLSource:
+		concrete.URL = s.URL.Expand(vars)
+	case profile.PathSource:
+		concrete.Path = s.Path.Expand(vars)
+	case profile.GitSource:
+		concrete.Git, concrete.Ref, concrete.Build, concrete.Out, concrete.Env = s.Repo.Expand(vars), s.Ref.Expand(vars), s.Build, s.Out.Expand(vars), s.Env
+	case profile.SrcSource:
+		concrete.Src, concrete.Build, concrete.Out, concrete.Env = s.Dir.Expand(vars), s.Build, s.Out.Expand(vars), s.Env
+	}
+	data, _ := json.Marshal(struct {
+		BinaryName string
+		Vars       profile.Vars
+		Source     profile.BinaryDocument
+	}{p.BinaryName, vars, concrete})
+	return fmt.Sprintf("%s-%x", version, sha256.Sum256(data))
 }
 
 // lock takes an exclusive flock on path. It polls so that cancelling ctx

@@ -150,7 +150,7 @@ func resolveBinary(ctx context.Context, a *app, stderr io.Writer, p profile.Prof
 		return binary.Binary{}, err
 	}
 	bar := &progress{w: stderr, last: -1}
-	if !a.json {
+	if !a.json && opts.Reporter == nil {
 		opts.Progress = bar.update
 		opts.BuildLog = stderr
 	}

@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/kevinpita/forklab/internal/progress"
 )
 
 // Command is one forklab invocation: the argv after the program name,
@@ -101,6 +103,74 @@ func (r Runner) Run(ctx context.Context, c Command) Result {
 	}
 	res.Data, res.Err = data, err
 	return res
+}
+
+func labCreate(c Command) bool { return len(c) > 1 && c[0] == "lab" && c[1] == "create" }
+
+func (r Runner) RunWithProgress(ctx context.Context, c Command, report progress.Reporter) Result {
+	if !labCreate(c) {
+		return r.Run(ctx, c)
+	}
+	start := time.Now()
+	x := r.command(ctx, c)
+	x.Args = append(x.Args, "--progress=json")
+	var stdout bytes.Buffer
+	stderr := &progressWriter{report: report}
+	x.Stdout, x.Stderr = &stdout, stderr
+	runErr := x.Run()
+	stderr.finish()
+	res := Result{Cmd: c, Took: time.Since(start)}
+	data, ok, err := decodeEnvelope(stdout.Bytes())
+	if !ok {
+		res.Err = failure(runErr, stderr.diagnostics)
+		return res
+	}
+	res.Data, res.Err = data, err
+	return res
+}
+
+const progressLineLimit = 8 * 1024
+
+type progressWriter struct {
+	report      progress.Reporter
+	line        []byte
+	oversized   bool
+	diagnostics []byte
+}
+
+func (w *progressWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	for _, b := range p {
+		if b == '\n' {
+			w.finish()
+			continue
+		}
+		if len(w.line) < progressLineLimit {
+			w.line = append(w.line, b)
+		} else {
+			w.oversized = true
+		}
+	}
+	return n, nil
+}
+
+func (w *progressWriter) finish() {
+	if len(w.line) == 0 && !w.oversized {
+		return
+	}
+	if e, ok := progress.Decode(w.line); ok && !w.oversized {
+		if w.report != nil {
+			w.report(e)
+		}
+	} else if !progressRecord(w.line) {
+		w.diagnostics = append(w.diagnostics, w.line...)
+		w.diagnostics = append(w.diagnostics, '\n')
+		if len(w.diagnostics) > progressLineLimit {
+			w.diagnostics = w.diagnostics[len(w.diagnostics)-progressLineLimit:]
+		}
+	}
+	w.line = w.line[:0]
+	w.oversized = false
 }
 
 type envelope struct {
@@ -269,4 +339,16 @@ func splitArgs(s string) ([]string, error) {
 		args = append(args, cur.String())
 	}
 	return args, nil
+}
+
+var progressPrefix = regexp.MustCompile(`^\s*\{\s*"type"\s*:\s*"forklab\.progress"`)
+
+func progressRecord(line []byte) bool {
+	var probe struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(line, &probe) == nil {
+		return probe.Type == "forklab.progress"
+	}
+	return progressPrefix.Match(line)
 }

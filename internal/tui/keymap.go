@@ -96,6 +96,8 @@ const (
 	actFormSubmit
 	actFormLeft
 	actFormRight
+	actFormUp
+	actFormDown
 )
 
 // scope is where a binding applies. Overlays own the keyboard while open;
@@ -338,10 +340,12 @@ var catalog = []binding{
 	bind(actClose, scopeConfirm, "Cancel", "esc", "n", "q", "ctrl+c").foot(11, "cancel"),
 
 	bind(actFormSubmit, scopeForm, "Run, or next step", "enter").foot(10, "run").onlyIf(formIdle),
-	bind(actFormNext, scopeForm, "Next field", "tab", "down").foot(11, "next").onlyIf(formIdle),
-	bind(actFormPrev, scopeForm, "Previous field", "shift+tab", "up").onlyIf(formIdle),
-	bind(actFormLeft, scopeForm, "Previous choice", "left").foot(12, "choose").shown("←→").onlyIf(formOnChoice),
+	bind(actFormNext, scopeForm, "Next field", "tab").foot(11, "next").onlyIf(formIdle),
+	bind(actFormPrev, scopeForm, "Previous field", "shift+tab").onlyIf(formIdle),
+	bind(actFormLeft, scopeForm, "Previous choice", "left").onlyIf(formOnChoice),
 	bind(actFormRight, scopeForm, "Next choice", "right", "space").onlyIf(formOnChoice),
+	bind(actFormUp, scopeForm, "Previous choice or increase number", "up").foot(12, "choose").shown("↑↓").onlyIf(formOnAdjustable),
+	bind(actFormDown, scopeForm, "Next choice or decrease number", "down").onlyIf(formOnAdjustable),
 	bind(actClose, scopeForm, "Cancel, or keep a running command in the background", "esc", "ctrl+c").foot(20, "close"),
 }
 
@@ -510,6 +514,18 @@ func (m *Model) footerBindings() []binding {
 		for _, b := range catalog {
 			if b.footer > 0 && b.scope == sc && b.enabled(m) {
 				if match, _ := m.match(b.keys[0]); match.scope == sc && match.id == b.id {
+					if b.id == actFormUp && m.form.focused().kind == fieldNumber {
+						b.hint = "adjust"
+					}
+					if b.id == actFormSubmit && m.form.spec.stepped {
+						b.hint = "next"
+						if m.form.reviewing() {
+							b.hint = "create lab"
+						}
+					}
+					if b.id == actFormNext && m.form.spec.stepped && m.form.reviewing() {
+						continue
+					}
 					out = append(out, b)
 				}
 			}
@@ -669,10 +685,12 @@ func init() {
 		actRecipeSave:     (*Model).saveRecipe,
 		actRecipeRun:      (*Model).runRecipe,
 		actFormSubmit:     (*Model).formSubmit,
-		actFormNext:       func(m *Model) tea.Cmd { m.form.move(1); return m.syncForm() },
+		actFormNext:       (*Model).formNext,
 		actFormPrev:       func(m *Model) tea.Cmd { m.form.back(); return m.syncForm() },
 		actFormLeft:       func(m *Model) tea.Cmd { return m.formCycle(-1) },
 		actFormRight:      func(m *Model) tea.Cmd { return m.formCycle(1) },
+		actFormUp:         func(m *Model) tea.Cmd { return m.formCycle(-1) },
+		actFormDown:       func(m *Model) tea.Cmd { return m.formCycle(1) },
 	}
 }
 

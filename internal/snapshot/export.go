@@ -14,10 +14,13 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kevinpita/forklab/internal/progress"
 )
 
 // ExportInput drives Export.
 type ExportInput struct {
+	Reporter progress.Reporter
 	// Archive is the snapshot archive, as returned by Fetch.
 	Archive string
 	// Binary is the chain binary that runs init and export.
@@ -75,6 +78,7 @@ const exportSpaceFactor = 4
 // concurrent exports of one snapshot run one after the other and the later
 // ones reuse the first result.
 func Export(ctx context.Context, in ExportInput) (Exported, error) {
+	in.Reporter.Emit("snapshot.cache", "Checking snapshot export cache", progress.Started)
 	archive, err := filepath.Abs(in.Archive)
 	if err != nil {
 		return Exported{}, err
@@ -119,9 +123,11 @@ func Export(ctx context.Context, in ExportInput) (Exported, error) {
 		Args: append([]string{}, in.Args...),
 	}
 	if exportCached(metaPath, out, want) {
+		in.Reporter.Emit("snapshot.cache", "Reused cached snapshot export", progress.Completed)
 		return Exported{Path: out, Cached: true}, nil
 	}
 
+	in.Reporter.Emit("snapshot.cache", "Snapshot export cache checked", progress.Completed)
 	if _, ok := extracted(archive, info, home); !ok {
 		size := info.Size()
 		basis := fmt.Sprintf("%dx the %s archive", exportSpaceFactor, humanBytes(uint64(size)))
@@ -130,16 +136,27 @@ func Export(ctx context.Context, in ExportInput) (Exported, error) {
 		}
 	}
 	if _, err := os.Stat(filepath.Join(home, "config", "config.toml")); err != nil {
+		in.Reporter.Emit("snapshot.init", "Initializing snapshot scratch home", progress.Started)
 		logf("init scratch home %s", home)
 		if err := initHome(ctx, binary, home, in.ChainID, logPath); err != nil {
 			return Exported{}, err
 		}
+		in.Reporter.Emit("snapshot.init", "Snapshot scratch home ready", progress.Completed)
 	}
+	in.Reporter.Emit("snapshot.extract", "Extracting snapshot", progress.Started)
 	logf("extract %s into %s", archive, filepath.Join(home, dataDir))
-	if _, err := Extract(ctx, archive, home); err != nil {
+	_, wasExtracted := extracted(archive, info, home)
+	_, err = Extract(ctx, archive, home)
+	if err != nil {
 		return Exported{}, err
 	}
 
+	message := "Snapshot extracted"
+	if wasExtracted {
+		message = "Reused extracted snapshot"
+	}
+	in.Reporter.Emit("snapshot.extract", message, progress.Completed)
+	in.Reporter.Emit("snapshot.export", "Exporting chain state", progress.Started)
 	logf("export with %s (log: %s)", binary, logPath)
 	if want.ExportSize, want.ExportSHA256, err = runExport(ctx, binary, home, in.Args, out, logPath); err != nil {
 		return Exported{}, err
@@ -158,6 +175,7 @@ func Export(ctx context.Context, in ExportInput) (Exported, error) {
 		}
 		logf("removed %s", filepath.Join(home, dataDir))
 	}
+	in.Reporter.Emit("snapshot.export", "Chain state exported", progress.Completed)
 	return Exported{Path: out, Log: logPath}, nil
 }
 

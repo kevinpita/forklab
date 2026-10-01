@@ -95,22 +95,19 @@ func TestEscFromAResultReturnsToTheList(t *testing.T) {
 	}
 }
 
-func TestWizardStepCountHolds(t *testing.T) {
+func TestWizardStepCountIncludesSourceQuestions(t *testing.T) {
 	m := emptyModel(t)
 	feedLabs(t, m, `[]`)
-	m.form.fields[0].opts = []option{{"simd", "simd"}}
-	m.form.fields[1].opts = []option{{"1", "1"}}
-	var seen []string
-	for _, k := range []string{"enter", "enter", "enter", "right", "enter", "x", "enter", "enter", "enter"} {
-		v := ansi.Strip(m.render())
-		i := strings.Index(v, "step ")
-		seen = append(seen, v[i:i+11])
-		press(m, k)
+	if m.form.stepCount() != 8 {
+		t.Fatalf("profile flow has %d steps", m.form.stepCount())
 	}
-	for _, s := range seen {
-		if !strings.HasSuffix(s, "of 7") {
-			t.Fatalf("step counter changed: %q", seen)
-		}
+	fill(m.form, map[string]string{"bin-kind": "git"})
+	if m.form.stepCount() != 12 {
+		t.Fatalf("Git flow has %d steps", m.form.stepCount())
+	}
+	fill(m.form, map[string]string{"mode": "fork"})
+	if m.form.stepCount() != 14 {
+		t.Fatalf("Git fork flow has %d steps", m.form.stepCount())
 	}
 }
 

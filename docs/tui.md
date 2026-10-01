@@ -9,11 +9,20 @@ the TUI shows that command before it runs.
 
 ## First run
 
-With no lab on disk, `forklab` opens a seven-step wizard that builds the
-`lab create` command as you answer (profile, version, validators, fresh or
-forked genesis, snapshot, chain id, and name), then offers to bring the lab
-up. Close it and press `n` to open it again while no lab exists, or `u` to
-start a lab that is down.
+With no lab on disk, `forklab` opens a wizard that builds the `lab create`
+command as you answer. Choose a profile, then a configured version, an existing
+executable, a download URL, a Git repository, or a local checkout. Custom sources
+ask for the expected binary version. Git builds also ask for a ref; Git and local
+builds ask for a build command and an output path relative to the checkout.
+The custom source is saved in the lab's profile snapshot. The shared profile
+stays unchanged.
+
+Choose validators, fresh or forked genesis, an optional chain ID, and a name.
+For a fork, pick a configured profile snapshot or enter a URL or local archive.
+The chain ID field shows the selected profile's default when left empty.
+The wizard shows a review before creating the lab, then offers to bring it up.
+Close it and press `n` to open it again while no lab exists, or `u` to start a
+lab that is down.
 
 ![The first-run wizard on its profile step](../.github/assets/wizard.png)
 
@@ -57,9 +66,22 @@ Press `?` for the keys of the focused panel.
 Forms cover a new lab, a new or edited profile, an upgrade schedule, a send, a
 proposal, a vote, a restart on a version, and a binary fetch or build. Every
 form shows the exact command it will run and updates it as you type. `Tab`
-and `Shift+Tab` move between fields, `Left` and `Right` change a choice,
-`Enter` runs the command, and `Esc` cancels it or keeps a running command in
-the background.
+and `Shift+Tab` move between fields. Arrow keys change a choice; left and right
+move the cursor in text fields. In the first-run wizard, `Enter` and `Tab`
+validate the answer and move forward. `Shift+Tab` goes back, and `Enter` on
+review creates the lab. `Tab` on review keeps the review open. Other forms run
+on `Enter`. `Esc` cancels an idle form or keeps a running command in the
+background.
+
+While a lab is being created, the form shows the current operation, recent
+completed steps, and elapsed time. Downloads show bytes transferred and a
+percentage when the server supplies a total. Cached binaries and snapshots
+show reuse instead of download progress. After `Esc`, the status line keeps
+showing the current operation.
+
+The TUI requests `lab create --progress=json` for live updates. This option
+writes versioned JSON progress records to stderr; stdout still contains one
+final result. Without this option, `--json` remains quiet until the result.
 
 This is `u` on the Upgrades panel:
 

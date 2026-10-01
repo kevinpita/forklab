@@ -117,12 +117,16 @@ func TestSmokeFirstLabWizard(t *testing.T) {
 		m := emptyModel(t)
 		m.Update(windowSize(size))
 		feedLabs(t, m, `[]`)
-		m.form.fields[0].opts = []option{{"simd", "simd  builtin"}}
-		m.form.fields[1].opts = []option{{"0.53.8", "0.53.8  url"}}
+		m.form.loads[Command{"profile", "list"}.String()] = &optionLoad{done: true, data: []byte(`[{"name":"simd","origin":"builtin"}]`)}
+		m.form.loads[Command{"profile", "show", "simd"}.String()] = &optionLoad{done: true, data: []byte(`{"profile":{"chain_id":"simd-1","binaries":{"0.53.8":{"url":"https://example.invalid/simd"}}}}`)}
+		m.syncForm()
 		mustFit(t, m, "ansi", size, "wizard")
-		for _, k := range []string{"enter", "enter", "enter", "right", "enter", "x", "enter", "enter", "enter", "shift+tab", "enter", "esc"} {
+		for step, k := range []string{"enter", "enter", "enter", "enter", "right", "enter", "enter", "x", "enter", "enter", "enter", "shift+tab", "enter", "esc"} {
 			press(m, k)
 			mustFit(t, m, "ansi", size, "wizard "+k)
+			if (step == 10 || step == 12) && !m.form.reviewing() {
+				t.Fatalf("wizard did not reach review at %v", size)
+			}
 		}
 	}
 }

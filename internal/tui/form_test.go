@@ -40,6 +40,104 @@ func typeText(m *Model, s string) {
 	}
 }
 
+func TestNumberFieldEditing(t *testing.T) {
+	for _, stepped := range []bool{false, true} {
+		name := "flat"
+		if stepped {
+			name = "stepped"
+		}
+		t.Run(name, func(t *testing.T) {
+			m := loadedModel(t, buildTheme("ansi", true))
+			m.openForm(&formSpec{stepped: stepped, fields: []fieldSpec{
+				{key: "number", label: "Number", kind: fieldNumber, def: "2", optional: true},
+				{key: "text", label: "Text", kind: fieldText},
+			}, build: func(v values) Command { return Command{"test", v["number"], v["text"]} }})
+			input := &m.form.fields[0].input
+			assert := func(want string) {
+				t.Helper()
+				if got := input.Value(); got != want {
+					t.Errorf("number = %q, want %q", got, want)
+				}
+				if m.form.focus != 0 || m.form.reviewing() {
+					t.Fatal("editing moved away from the number")
+				}
+			}
+			press(m, "x", "space", ".", "-", "é")
+			assert("2")
+			input.SetValue("2")
+			input.CursorEnd()
+			m.Update(tea.PasteMsg{Content: "9x"})
+			assert("2")
+			m.Update(tea.PasteMsg{Content: " 3\n"})
+			assert("2")
+			m.Update(tea.KeyPressMsg{Code: '4', Text: "4x"})
+			assert("2")
+			input.SetValue("2")
+			input.CursorEnd()
+			m.Update(tea.PasteMsg{Content: "34"})
+			assert("234")
+			press(m, "left", "right", "left", "backspace")
+			m.Update(tea.KeyPressMsg{Code: tea.KeyDelete})
+			assert("2")
+			press(m, "up")
+			assert("3")
+			press(m, "down", "down", "down")
+			assert("1")
+			press(m, "backspace")
+			assert("")
+			if m.form.problem(0, m.form.values()) != "" {
+				t.Fatal("optional empty number is invalid")
+			}
+			press(m, "down")
+			assert("1")
+			input.SetValue("")
+			press(m, "up")
+			assert("1")
+			input.SetValue("0")
+			press(m, "up")
+			assert("1")
+			input.SetValue("0")
+			press(m, "down")
+			assert("1")
+			input.SetValue("18446744073709551616")
+			press(m, "up")
+			assert("18446744073709551617")
+			press(m, "down")
+			assert("18446744073709551616")
+			if !strings.Contains(ansi.Strip(strings.Join(m.formTail(100), "\n")), "↑↓ adjust") {
+				t.Fatal("number modal does not explain the arrow keys")
+			}
+			found := false
+			for _, b := range m.footerBindings() {
+				found = found || b.footerKey()+" "+b.hint == "↑↓ adjust"
+			}
+			if !found {
+				t.Fatal("number footer does not explain the arrow keys")
+			}
+			press(m, "tab")
+			typeText(m, "x.-")
+			m.Update(tea.PasteMsg{Content: " text"})
+			if got := m.form.fields[1].input.Value(); got != "x.- text" {
+				t.Fatalf("text input = %q", got)
+			}
+			m.form.setFocus(0)
+			if stepped {
+				m.form.step = len(m.form.visible())
+				press(m, "up", "down")
+				if input.Value() != "18446744073709551616" || !m.form.reviewing() {
+					t.Fatal("arrows changed a number during review")
+				}
+			}
+			m.form.running = Command{"test"}
+			press(m, "up", "down", "5")
+			m.Update(tea.PasteMsg{Content: "6"})
+			if input.Value() != "18446744073709551616" {
+				t.Fatal("running form accepted input")
+			}
+		})
+	}
+}
+
 func TestFormArgv(t *testing.T) {
 	m := loadedModel(t, buildTheme("ansi", true))
 	labForm := func(m *Model) *formSpec { return labCreateSpec(m, false) }
@@ -73,8 +171,8 @@ func TestFormArgv(t *testing.T) {
 		},
 		{
 			"profile edit, changed fields only", profileEditSpec,
-			map[string]string{"voting-period": "30s", "expedited-voting-period": "", "bin-version": "0.54.0", "bin-kind": "git", "bin-location": "https://g/x"},
-			"forklab profile edit lsimd --binary 0.54.0=git:https://g/x --voting-period 30s --expedited-voting-period '' --json",
+			map[string]string{"voting-period": "30s", "expedited-voting-period": "", "bin-version": "0.54.0", "bin-kind": "git", "bin-location": "https://g/x", "bin-ref": "v0.54.0", "bin-build": "make build", "bin-out": "build/simd"},
+			"forklab profile edit lsimd --binary 0.54.0=git:https://g/x --binary-ref 0.54.0=v0.54.0 --binary-build '0.54.0=make build' --binary-out 0.54.0=build/simd --voting-period 30s --expedited-voting-period '' --json",
 		},
 		{
 			"upgrade schedule in blocks", upgradeScheduleSpec,
@@ -193,7 +291,7 @@ func TestFormValidatesBeforeRunning(t *testing.T) {
 	if v := ansi.Strip(m.render()); !strings.Contains(v, "letters, digits, dots, dashes, underscores") {
 		t.Fatalf("name with a space not flagged:\n%s", v)
 	}
-	press(m, "tab", "tab", "tab")
+	press(m, "tab", "tab", "tab", "tab")
 	press(m, "backspace")
 	typeText(m, "0")
 	if v := ansi.Strip(m.render()); !strings.Contains(v, "a whole number above 0") {
@@ -320,7 +418,7 @@ func TestFirstLabWizard(t *testing.T) {
 		t.Fatal("n did not reopen the wizard")
 	}
 	drive(t, m, cmd, func() bool { return m.form.values()["version"] != "" })
-	for _, step := range []string{"Profile", "Version", "Validators", "Genesis", "Chain ID", "Name"} {
+	for _, step := range []string{"Profile", "Binary source", "Version", "Validators", "Genesis", "Chain ID", "Name"} {
 		if v := ansi.Strip(m.render()); !strings.Contains(v, step) {
 			t.Fatalf("step %s not shown:\n%s", step, v)
 		}
@@ -345,7 +443,7 @@ func TestFormErrorKeepsTheInput(t *testing.T) {
 	m := emptyModel(t)
 	cmd := feedLabs(t, m, `[]`)
 	drive(t, m, cmd, func() bool { return m.form.values()["version"] != "" })
-	press(m, "enter", "enter", "enter", "enter", "enter")
+	press(m, "enter", "enter", "enter", "enter", "enter", "enter")
 	for range len("devnet") {
 		press(m, "backspace")
 	}
@@ -364,9 +462,9 @@ func TestLongRunCanGoToTheBackground(t *testing.T) {
 	m := emptyModel(t)
 	cmd := feedLabs(t, m, `[]`)
 	drive(t, m, cmd, func() bool { return m.form.values()["version"] != "" })
-	press(m, "enter", "enter", "enter", "enter", "enter", "enter")
+	press(m, "enter", "enter", "enter", "enter", "enter", "enter", "enter")
 	run := press(m, "enter")
-	if v := ansi.Strip(m.render()); !strings.Contains(v, "esc keeps it running in the background") {
+	if v := ansi.Strip(m.render()); !strings.Contains(v, "Esc keeps it running in the background") {
 		t.Fatalf("running form shows no progress:\n%s", v)
 	}
 	press(m, "esc")
@@ -454,6 +552,9 @@ func TestFormCommandIsNeverCut(t *testing.T) {
 	for _, l := range m.formTail(inner)[1:] {
 		if w := ansi.StringWidth(l); w > inner {
 			t.Errorf("tail line is %d cells, the form %d: %q", w, inner, ansi.Strip(l))
+		}
+		if strings.Contains(ansi.Strip(l), "Enter run") {
+			break
 		}
 		got = append(got, strings.TrimSpace(ansi.Strip(l)))
 	}
