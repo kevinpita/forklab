@@ -66,6 +66,7 @@ directory). Without it they use the running lab, or the only lab on disk.
 | `gov show <id>` | Show a proposal and its tally |
 | `upgrade schedule <version>` | Schedule an upgrade at `--height` or `--in` blocks and swap binaries at the halt |
 | `upgrade cancel` | Cancel the scheduled upgrade through governance |
+| `upgrade recover` | Switch to previous binaries and skip the failed height with `--previous`, or retry with `--version` |
 | `upgrade status` | Show the plan and each node's version and swap state |
 | `exec -- <bin args>` | Run the chain binary with the lab's home, node, chain id, and keyring |
 | `runbook validate <file.yaml>` | Validate a YAML recipe without contacting a chain |

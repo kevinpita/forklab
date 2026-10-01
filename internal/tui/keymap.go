@@ -81,6 +81,7 @@ const (
 	actLabMnemonics
 	actNodeRestartOn
 	actUpgradeSchedule
+	actUpgradeRecover
 	actUpgradeCancel
 	actSend
 	actProposalNew
@@ -297,6 +298,7 @@ var catalog = []binding{
 	bind(actProposalSubmitFile, scopeProposals, "Submit saved proposal file", "S").onlyIf(chainUp).opens(proposalSubmitFileSpec),
 	bind(actProposalVote, scopeProposals, "Vote", "v").foot(11, "vote").onlyIf(hasProposal).opens(govVoteSpec),
 
+	bind(actUpgradeRecover, scopeGlobal, "Recover upgrade", "U").foot(9, "recover upgrade").pal().onlyIf(canRecoverUpgrade).opens(upgradeRecoverySpec),
 	bind(actUpgradeSchedule, scopeUpgrades, "Schedule an upgrade", "u").foot(10, "schedule").onlyIf(chainUp).opens(upgradeScheduleSpec),
 	bind(actUpgradeCancel, scopeUpgrades, "Cancel the upgrade", "X").foot(11, "cancel").onlyIf(hasPlan).
 		runs(func(*Model) Command { return Command{"upgrade", "cancel"} }, "Cancel upgrade %s through governance?", true),

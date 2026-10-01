@@ -82,10 +82,13 @@ Upgrade scheduling shows proposal confirmation, the voting deadline, each node's
 restart state, and block recovery. After `Esc`, the command continues in the
 background and the status line shows its current operation.
 
-The TUI requests `--progress=json` for `lab create` and `upgrade schedule`.
-This option writes versioned JSON progress records to stderr; stdout still
-contains one final result. Without this option, `--json` remains quiet until
-the result.
+The TUI requests `--progress=json` for `lab create`, `upgrade schedule`, and
+`upgrade recover`. This option writes versioned JSON progress records to
+stderr; stdout still contains one final result. Without this option, `--json`
+remains quiet until the result.
+
+Press `U` when an upgrade needs attention to review recovery options, even
+while the chain is down.
 
 This is `u` on the Upgrades panel:
 

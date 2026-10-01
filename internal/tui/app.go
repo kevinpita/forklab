@@ -601,14 +601,14 @@ func (m *Model) poll(all bool) tea.Cmd {
 	want(loadNodes, 2*time.Second, Command{"node", "list"})
 	want(loadProfiles, 20*time.Second, Command{"profile", "list"})
 	want(loadBinaries, 20*time.Second, Command{"binary", "list"})
-	if m.chainUp() {
-		focused := func(p panelID, slow, fast time.Duration) time.Duration {
-			if m.panel == p {
-				return fast
-			}
-			return slow
+	focused := func(p panelID, slow, fast time.Duration) time.Duration {
+		if m.panel == p {
+			return fast
 		}
-		want(loadUpgrade, focused(panelUpgrades, 10*time.Second, 3*time.Second), Command{"upgrade", "status"})
+		return slow
+	}
+	want(loadUpgrade, focused(panelUpgrades, 10*time.Second, 3*time.Second), Command{"upgrade", "status"})
+	if m.chainUp() {
 		want(loadProposals, focused(panelProposals, 15*time.Second, 4*time.Second), Command{"gov", "list"})
 		want(loadAccounts, focused(panelAccounts, 30*time.Second, 6*time.Second), Command{"account", "list"})
 		if p, ok := m.selectedProposal(); ok && m.panel == panelProposals &&
@@ -658,6 +658,13 @@ func (m *Model) applyLoad(msg resultMsg) tea.Cmd {
 	case loadUpgrade:
 		m.upgrade = &upgradeStatus{}
 		err = json.Unmarshal(data, m.upgrade)
+		currentLab := m.streamLab
+		if m.status != nil {
+			currentLab = m.status.Lab
+		}
+		if err == nil && currentLab != "" && m.upgrade.Lab != currentLab {
+			m.upgrade = nil
+		}
 	case loadAccounts:
 		err = decodeInto(data, &m.accounts)
 	case loadLabs:
@@ -694,6 +701,7 @@ func (m *Model) followRunningLab() {
 	if running == "" || (m.status != nil && m.status.Lab == running) {
 		return
 	}
+	m.invalidateUpgrade()
 	m.setStatus(nil)
 	m.consensus = nil
 	m.startStream(streamStatus, "")
@@ -892,8 +900,11 @@ func (m *Model) clearLoad(k loadKind) {
 // setStatus records the chain status and drops the chain data of a lab
 // that stopped or was replaced, so no panel shows it as live.
 func (m *Model) setStatus(s *labStatus) {
+	if s != nil && m.upgrade != nil && m.upgrade.Lab != s.Lab {
+		m.invalidateUpgrade()
+	}
 	if s == nil || m.status == nil || s.Lab != m.status.Lab {
-		for _, k := range []loadKind{loadProposals, loadProposal, loadAccounts, loadUpgrade} {
+		for _, k := range []loadKind{loadProposals, loadProposal, loadAccounts} {
 			m.clearLoad(k)
 			m.loads[k].at, m.loads[k].err = time.Time{}, nil
 		}

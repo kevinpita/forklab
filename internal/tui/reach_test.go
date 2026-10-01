@@ -33,7 +33,8 @@ func labStates(t *testing.T) []*Model {
 	press(builder, "ctrl+e")
 	fill(builder.form, map[string]string{"path": "./case.yaml"})
 	_ = builder.formSubmit()
-	return []*Model{running, exited, planned, stopped, none, builder}
+	failed := failedUpgradeModel(t)
+	return []*Model{running, exited, planned, stopped, none, builder, failed}
 }
 
 // offered is every command the TUI can run or show: each binding's command

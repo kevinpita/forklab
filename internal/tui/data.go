@@ -145,13 +145,27 @@ type proposal struct {
 	Tally *tally `json:"tally"`
 }
 
+type upgradeTarget struct {
+	Index   int    `json:"index"`
+	Binary  string `json:"binary"`
+	Version string `json:"version"`
+}
+
+type upgradeRecovery struct {
+	ID      string          `json:"id"`
+	Mode    string          `json:"mode"`
+	Targets []upgradeTarget `json:"targets"`
+}
+
 type pendingUpgrade struct {
-	Name       string `json:"name"`
-	Height     int64  `json:"height"`
-	Version    string `json:"version"`
-	Binary     string `json:"binary"`
-	AutoSwap   bool   `json:"auto_swap"`
-	ProposalID uint64 `json:"proposal_id"`
+	Previous   []upgradeTarget  `json:"previous"`
+	Recovery   *upgradeRecovery `json:"recovery"`
+	Name       string           `json:"name"`
+	Height     int64            `json:"height"`
+	Version    string           `json:"version"`
+	Binary     string           `json:"binary"`
+	AutoSwap   bool             `json:"auto_swap"`
+	ProposalID uint64           `json:"proposal_id"`
 }
 
 type halt struct {

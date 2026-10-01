@@ -241,6 +241,16 @@ func nodeMain(m *Model, w, h int) mainView {
 		chain += "  " + kv(th, "version", v)
 	}
 	lines := []string{head, chain + "  " + th.Dim.Render(n.Binary), th.Border.Render(strings.Repeat("─", max(w, 0)))}
+	if m.upgradeNeedsRecovery() {
+		lines = append(lines[:2], th.Warn.Render(m.recoveryHint()))
+		for _, u := range m.upgrade.Nodes {
+			if u.Name == n.Name && u.SwapError != "" {
+				diagnostic := strings.Split(ansi.Wrap(th.Bad.Render(u.SwapError), max(w, 1), ""), "\n")
+				lines = append(lines, diagnostic[:min(len(diagnostic), 3)]...)
+			}
+		}
+		lines = append(lines, th.Border.Render(strings.Repeat("─", max(w, 0))))
+	}
 	rows := max(h-len(lines), 0)
 	var logs []string
 	for _, l := range m.logs.window(rows) {
@@ -530,7 +540,7 @@ func upgradeRows(m *Model) []listRow {
 		g, st := "●", m.th.Good
 		aside := u.State
 		switch {
-		case u.Phase == "swap_failed":
+		case u.Phase == "swap_failed" || (u.Phase == "swapped" && u.State != "running"):
 			g, st, aside = "✗", m.th.Bad, "swap failed"
 		case u.Phase != "":
 			g, st, aside = "◆", m.th.Warn, u.Phase
@@ -555,8 +565,12 @@ func (m *Model) plan() *chainPlan {
 func upgradeSummary(m *Model) string {
 	p := m.plan()
 	switch {
+	case m.upgradeNeedsRecovery():
+		return "attention " + m.upgrade.Pending.Name
 	case p != nil:
 		return fmt.Sprintf("%s@%d", p.Name, p.Height)
+	case m.upgrade != nil && m.upgrade.Pending != nil:
+		return fmt.Sprintf("%s@%d", m.upgrade.Pending.Name, m.upgrade.Pending.Height)
 	case m.completedUpgrade() != nil:
 		return "done " + m.completedUpgrade().Name
 	}
@@ -587,18 +601,23 @@ func (m *Model) blocksLeft(h int64) string {
 	return s
 }
 
-func upgradeMain(m *Model, _, _ int) mainView {
+func upgradeMain(m *Model, width, _ int) mainView {
 	th := m.th
 	u := m.upgrade
 	if u == nil {
 		return mainView{title: "Upgrades", lines: m.emptyHint(loadUpgrade, "no lab running")}
 	}
 	var lines []string
+	if m.upgradeNeedsRecovery() {
+		lines = append(lines, th.Warn.Render(m.recoveryHint()), "")
+	}
 	if p := m.plan(); p != nil {
 		lines = append(lines, th.Title.Render("PLAN")+"  "+th.Val.Render(p.Name)+"  "+kv(th, "at", strconv.FormatInt(p.Height, 10))+"  "+th.Warn.Render(m.blocksLeft(p.Height)))
 		if p.Info != "" {
 			lines = append(lines, kv(th, "info", p.Info))
 		}
+	} else if u.Pending != nil {
+		lines = append(lines, th.Title.Render("PENDING")+fmt.Sprintf("  %s at %d", u.Pending.Name, u.Pending.Height))
 	} else if m.completedUpgrade() == nil {
 		lines = append(lines, th.Dim.Render("no upgrade plan on chain"))
 	}
@@ -612,6 +631,12 @@ func upgradeMain(m *Model, _, _ int) mainView {
 			line += "  " + kv(th, "proposal", fmt.Sprintf("#%d", p.ProposalID))
 		}
 		lines = append(lines, line, "  "+th.Dim.Render(p.Binary))
+		for _, previous := range p.Previous {
+			lines = append(lines, kv(th, fmt.Sprintf("previous node%d", previous.Index), previous.Version))
+		}
+		if p.Recovery != nil {
+			lines = append(lines, kv(th, "recovery", p.Recovery.Mode))
+		}
 	} else if c := m.completedUpgrade(); c != nil {
 		lines = append(lines, th.Title.Render("LAST")+"  "+th.Val.Render(c.Name)+"  "+kv(th, "to", c.Version)+"  "+th.Good.Render(fmt.Sprintf("completed at %d", c.Height)))
 	}
@@ -630,6 +655,9 @@ func upgradeMain(m *Model, _, _ int) mainView {
 			st = th.Warn
 		case "swapped":
 			st = th.Good
+			if n.State != "running" {
+				phase, st = "failed", th.Bad
+			}
 		}
 		lines = append(lines, fmt.Sprintf("%-10s %-12s %-9s %s %s", n.Name, n.Version, n.State, st.Render(padRight(phase, 12)), haltAt))
 		if n.SwapError != "" {
@@ -642,6 +670,7 @@ func upgradeMain(m *Model, _, _ int) mainView {
 	if m.plan() == nil && u.Pending == nil {
 		lines = append(lines, "", th.Dim.Render("press u to schedule one"))
 	}
+	lines = strings.Split(ansi.Wrap(strings.Join(lines, "\n"), max(width, 1), ""), "\n")
 	return mainView{title: "Upgrades", right: th.Dim.Render(upgradeSummary(m)), lines: lines}
 }
 

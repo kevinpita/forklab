@@ -114,6 +114,8 @@ func TestDecodeCapturedCLIOutput(t *testing.T) {
 
 func TestUpgradesPanelShowsACompletedUpgrade(t *testing.T) {
 	m := loadedModel(t, buildTheme("ansi", true))
+	m.streamLab = "up14"
+	m.status.Lab = "up14"
 	feed(t, m, loadUpgrade, "upgrade_status_completed.json")
 	v := ansi.Strip(strings.Join(upgradeMain(m, 100, 30).lines, "\n"))
 	if !strings.HasPrefix(v, "LAST  v11.2.0  to 11.2.0  completed at 42\n") || strings.Contains(v, "no upgrade plan") || strings.Contains(v, "SWAP") || strings.Contains(v, "swapped") {

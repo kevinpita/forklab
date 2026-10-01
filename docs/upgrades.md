@@ -65,6 +65,28 @@ swap state. `forklab status` also lists any pending upgrade.
 
 `forklab upgrade cancel` cancels a scheduled plan through governance.
 
+## Recover a failed upgrade
+
+Press `U` in the TUI when an upgrade needs attention. The recovery form lets
+you review either action before restarting all validators:
+
+```sh
+forklab upgrade recover --lab xrp --previous
+forklab upgrade recover --lab xrp --version 11.2.0
+```
+
+`--previous` switches each node to its recorded previous binary and skips the
+failed upgrade height. It keeps existing chain data; it does not restore a
+checkpoint. `--version` retries the pending upgrade with a version from the
+lab's profile. Recovery disables automatic swapping before changing nodes
+and succeeds only after every node runs its intended binary and produces
+fresh blocks past the upgrade height.
+
+`upgrade status` keeps the pending plan, previous binaries, and node errors
+available when the chain is down. The TUI shows the recovery action above
+node logs and in the Upgrades panel. Recovery progress continues in the
+background if you close the form with `Esc`.
+
 ## Expedited proposals
 
 Upgrade and cancel proposals are regular proposals by default. Pass

@@ -94,6 +94,9 @@ func (m *Model) header() string {
 	th := m.th
 	parts := []string{th.Logo.Render("forklab")}
 	sep := th.Border.Render(" │ ")
+	if m.upgradeNeedsRecovery() {
+		return strings.Join(parts, "") + " " + th.Warn.Render(m.recoveryHint())
+	}
 	s := m.status
 	if s == nil {
 		var msg string

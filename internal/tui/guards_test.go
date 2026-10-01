@@ -37,7 +37,7 @@ func TestChainStreamErrorMeansChainDown(t *testing.T) {
 	if m.status != nil || m.consensus != nil || m.chainUp() {
 		t.Fatalf("status %+v consensus %+v kept after the stream failed", m.status, m.consensus)
 	}
-	if m.proposals != nil || m.accounts != nil || m.upgrade != nil {
+	if m.proposals != nil || m.accounts != nil {
 		t.Fatal("chain panels still show data from before the failure")
 	}
 	if h := ansi.Strip(m.header()); strings.Contains(h, "connection refused") || !strings.Contains(h, "Starting the chain…") {
@@ -52,12 +52,12 @@ func TestChainStreamErrorMeansChainDown(t *testing.T) {
 		t.Fatalf("status line does not carry the failure: %q", line)
 	}
 	m.poll(true)
-	for _, k := range []loadKind{loadProposals, loadAccounts, loadUpgrade, loadProposal} {
+	for _, k := range []loadKind{loadProposals, loadAccounts, loadProposal} {
 		if m.loads[k].inflight {
 			t.Errorf("load %d polled while the chain is down", k)
 		}
 	}
-	if !m.loads[loadNodes].inflight || !m.loads[loadLabs].inflight {
+	if !m.loads[loadNodes].inflight || !m.loads[loadLabs].inflight || !m.loads[loadUpgrade].inflight {
 		t.Error("local queries stopped with the chain")
 	}
 	press(m, "2")
@@ -164,7 +164,7 @@ func TestStoppedLabDropsChainData(t *testing.T) {
 		kind: streamStatus, session: m.streams[streamStatus].session,
 		line: []byte(`{"ok":false,"error":{"code":"lab_not_running","message":"no lab running"}}`),
 	})
-	if m.proposals != nil || m.accounts != nil || m.upgrade != nil || m.proposal != nil {
+	if m.proposals != nil || m.accounts != nil || m.proposal != nil {
 		t.Fatal("chain data of a stopped lab still shown")
 	}
 }

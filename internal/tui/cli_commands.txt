@@ -41,6 +41,7 @@ status
 store
 tui
 upgrade cancel
+upgrade recover
 upgrade schedule
 upgrade status
 version
