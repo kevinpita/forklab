@@ -32,7 +32,7 @@ func newUpgradeCmd(a *app) *cobra.Command {
 		Short: "Schedule, cancel, and follow software upgrades",
 	}
 	labRefFlag(cmd, &ref)
-	cmd.AddCommand(newUpgradeScheduleCmd(a, &ref), newUpgradeCancelCmd(a, &ref), newUpgradeStatusCmd(a, &ref))
+	cmd.AddCommand(newUpgradeScheduleCmd(a, &ref), newUpgradeCancelCmd(a, &ref), newUpgradeStatusCmd(a, &ref), newUpgradeRecoverCmd(a, &ref))
 	return cmd
 }
 
@@ -178,6 +178,11 @@ const pastPlanBlocks = 3
 
 func schedule(cmd *cobra.Command, a *app, e labEnv, version string, f scheduleFlags) error {
 	ctx := cmd.Context()
+	unlock, err := lockUpgrade(e.dir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if f.height <= 0 && f.in <= 0 {
 		return output.Usagef("--height and --in must be positive")
 	}
@@ -209,6 +214,28 @@ func schedule(cmd *cobra.Command, a *app, e labEnv, version string, f scheduleFl
 			return fmt.Errorf("upgrade %q is registered and its proposal %d is still in %s; wait for it or run forklab upgrade cancel", pending.Name, pending.ProposalID, prop.Status)
 		}
 	}
+	st, err := sup.Upgrade()
+	if err != nil {
+		return err
+	}
+	if st.Upgrade != nil && st.Upgrade.Recovery != nil {
+		return errors.New("upgrade recovery is pending; finish it before scheduling another upgrade")
+	}
+	if st.RecoveryProtocol < 1 {
+		if err := sup.Exit(); err != nil {
+			return err
+		}
+		if sup, err = ensureSupervisor(ctx, e.dir); err != nil {
+			return err
+		}
+		st, err = sup.Upgrade()
+		if err != nil {
+			return err
+		}
+		if st.RecoveryProtocol < 1 {
+			return errors.New("supervisor cannot preserve original upgrade binaries; rebuild forklab")
+		}
+	}
 	current, blockTime, voting, err := planWindow(ctx, c, rpc, e.profile.BlockTime, f.expedited)
 	if err != nil {
 		return err
@@ -222,6 +249,13 @@ func schedule(cmd *cobra.Command, a *app, e labEnv, version string, f scheduleFl
 	}
 	name := cmp.Or(f.name, e.profile.UpgradeName.Expand(profile.Vars{Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH, ChainID: e.cfg.ChainID}))
 	plan := supervisor.Upgrade{Name: name, Height: height, Version: version, Binary: bin.Path, AutoSwap: !f.noAutoSwap}
+	specs, err := supervisor.LoadNodes(e.dir)
+	if err != nil {
+		return err
+	}
+	for i, spec := range specs {
+		plan.Previous = append(plan.Previous, supervisor.UpgradeTarget{Index: i, Binary: spec.Binary, Version: e.cfg.Nodes[i].Version})
+	}
 
 	p, err := buildProposal(ctx, c, proposalFlags{template: "upgrade", name: name, height: height, info: "forklab upgrade to " + version, expedited: f.expedited})
 	if err != nil {
@@ -272,7 +306,7 @@ func schedule(cmd *cobra.Command, a *app, e labEnv, version string, f scheduleFl
 	v.Upgraded = true
 	f.reporter.Emit("upgrade.complete", "Recording completed upgrade", taskprogress.Started)
 	if sup, err = ensureSupervisor(ctx, e.dir); err == nil {
-		_, err = sup.CompleteUpgrade(name)
+		_, err = sup.CompleteExpectedUpgrade(&plan)
 	}
 	if err != nil {
 		return fmt.Errorf("upgrade %q: the chain passed height %d on %s, but the supervisor did not mark the upgrade completed: %w", name, v.Height, version, err)
@@ -415,10 +449,13 @@ func waitSwapped(ctx context.Context, dir, name string, report taskprogress.Repo
 				if st.Upgrade == nil {
 					return nodes, errors.New("the plan was cleared from the supervisor")
 				}
+				if st.Upgrade.Name != name || st.Upgrade.Recovery != nil {
+					return nodes, errors.New("pending upgrade changed or recovery started")
+				}
 				done := true
 				for _, n := range nodes {
-					if n.Upgrade == supervisor.SwapFailed {
-						return nodes, fmt.Errorf("%s: %s", n.Name, n.SwapError)
+					if n.Upgrade == supervisor.SwapFailed || n.Upgrade == supervisor.SwapDone && n.State != supervisor.StateRunning {
+						return nodes, fmt.Errorf("%s: %s (%s)", n.Name, n.State, n.SwapError)
 					}
 					done = done && n.Upgrade == supervisor.SwapDone
 				}
@@ -453,7 +490,7 @@ func swapSummary(nodes []supervisor.NodeStatus) string {
 func (e labEnv) unswappedLogs(nodes []supervisor.NodeStatus) string {
 	var b strings.Builder
 	for _, n := range nodes {
-		if n.Upgrade == supervisor.SwapDone || n.Index >= len(e.cfg.Nodes) {
+		if n.Upgrade == supervisor.SwapDone && n.State == supervisor.StateRunning || n.Index >= len(e.cfg.Nodes) {
 			continue
 		}
 		logPath := filepath.Join(lab.NodeHome(e.dir, e.cfg.Nodes[n.Index]), "node.log")
@@ -467,6 +504,39 @@ func (e labEnv) unswappedLogs(nodes []supervisor.NodeStatus) string {
 // path and its last error lines.
 func (e labEnv) waitPast(ctx context.Context, h int64, report taskprogress.Reporter) (int64, error) {
 	report.Emit("upgrade.blocks", fmt.Sprintf("Waiting for blocks through height %d", h), taskprogress.Started)
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	monitorDone := make(chan struct{})
+	defer close(monitorDone)
+	go func() {
+		tick := time.NewTicker(250 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-monitorDone:
+				return
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				sup, err := supervisor.Dial(e.dir)
+				if err != nil {
+					cancel(err)
+					return
+				}
+				nodes, err := sup.Status()
+				if err != nil {
+					cancel(err)
+					return
+				}
+				for _, n := range nodes {
+					if n.State != supervisor.StateRunning {
+						cancel(fmt.Errorf("%s exited after restart%s", n.Name, e.unswappedLogs(nodes)))
+						return
+					}
+				}
+			}
+		}
+	}()
 	heights := make([]int64, len(e.clients))
 	errs := make([]error, len(e.clients))
 	var wg sync.WaitGroup
@@ -494,6 +564,9 @@ func (e labEnv) waitPast(ctx context.Context, h int64, report taskprogress.Repor
 		}
 	}
 	err := errors.Join(errs...)
+	if cause := context.Cause(ctx); cause != nil {
+		err = cause
+	}
 	if err == nil {
 		report.Emit("upgrade.blocks", fmt.Sprintf("Chain resumed at height %d", top), taskprogress.Completed)
 	}
@@ -510,7 +583,10 @@ func lastErrorLines(path string, n int) string {
 	var found []string
 	for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
 		line = supervisor.StripANSI(line)
-		if strings.Contains(line, "ERR") || strings.Contains(line, "panic") {
+		if strings.HasPrefix(strings.TrimSpace(line), "-") {
+			continue
+		}
+		if strings.Contains(strings.ToLower(line), "error") || strings.Contains(line, "ERR") || strings.Contains(line, "panic") {
 			found = append(found, "  "+line)
 		}
 	}
@@ -544,6 +620,11 @@ func newUpgradeCancelCmd(a *app, ref *string) *cobra.Command {
 				return err
 			}
 			ctx := cmd.Context()
+			unlock, err := lockUpgrade(e.dir)
+			if err != nil {
+				return err
+			}
+			defer unlock()
 			c, rpc, err := e.liveCLI(ctx)
 			if err != nil {
 				return err
@@ -640,11 +721,14 @@ func newUpgradeStatusCmd(a *app, ref *string) *cobra.Command {
 			}
 			ctx := cmd.Context()
 			v := upgradeStatusView{Lab: e.cfg.Name}
-			sup, err := dial(e.dir)
-			if err != nil {
-				return err
+			sup, dialErr := supervisor.Dial(e.dir)
+			var st supervisor.Response
+			if dialErr == nil {
+				st, err = sup.Upgrade()
+			} else {
+				st, err = supervisor.LoadUpgradeStatus(e.dir)
+				v.Warnings = append(v.Warnings, "supervisor offline; showing persisted upgrade")
 			}
-			st, err := sup.Upgrade()
 			if err != nil {
 				return err
 			}
@@ -655,9 +739,17 @@ func newUpgradeStatusCmd(a *app, ref *string) *cobra.Command {
 			} else if v.Plan, err = c.UpgradePlan(ctx); err != nil {
 				v.Warnings = append(v.Warnings, "upgrade plan: "+err.Error())
 			}
-			if rpc != nil && st.Upgrade != nil && allSwapped(st.Nodes) {
-				if chainSt, err := rpc.Status(ctx); err == nil && chainSt.LatestHeight > st.Upgrade.Height {
-					if done, err := sup.CompleteUpgrade(st.Upgrade.Name); err != nil {
+			if sup != nil && rpc != nil && st.Upgrade != nil && st.Upgrade.Recovery == nil && allSwapped(st.Nodes) {
+				ready := true
+				for i, rpc := range e.clients {
+					chainSt, queryErr := rpc.Status(ctx)
+					if queryErr != nil || chainSt.LatestHeight < st.Upgrade.Height+pastPlanBlocks || st.Nodes[i].Binary != st.Upgrade.Binary {
+						ready = false
+						break
+					}
+				}
+				if ready {
+					if done, err := sup.CompleteExpectedUpgrade(st.Upgrade); err != nil {
 						v.Warnings = append(v.Warnings, "complete upgrade: "+err.Error())
 					} else {
 						st = done
@@ -665,13 +757,24 @@ func newUpgradeStatusCmd(a *app, ref *string) *cobra.Command {
 				}
 			}
 			v.Pending, v.Completed, v.Nodes = st.Upgrade, st.Completed, upgradeNodes(e.cfg, st.Nodes)
+			if v.Pending != nil {
+				for i := range v.Nodes {
+					if v.Nodes[i].State != supervisor.StateRunning {
+						if diagnostic := strings.TrimSpace(lastErrorLines(filepath.Join(lab.NodeHome(e.dir, e.cfg.Nodes[i]), "node.log"), 1)); diagnostic != "" {
+							v.Nodes[i].SwapError = diagnostic
+						}
+					}
+				}
+			}
 			return a.print(cmd, v)
 		},
 	}
 }
 
 func allSwapped(nodes []supervisor.NodeStatus) bool {
-	return !slices.ContainsFunc(nodes, func(n supervisor.NodeStatus) bool { return n.Upgrade != supervisor.SwapDone })
+	return !slices.ContainsFunc(nodes, func(n supervisor.NodeStatus) bool {
+		return n.Upgrade != supervisor.SwapDone || n.State != supervisor.StateRunning
+	})
 }
 
 // minDeposit is the chain's minimum deposit for a proposal.

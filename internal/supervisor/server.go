@@ -24,7 +24,8 @@ import (
 var ErrAlreadyRunning = errors.New("a supervisor is already running for this lab")
 
 type Options struct {
-	LabDir string
+	LabDir        string
+	FreezeUpgrade bool
 	// Subscriber, when set, receives every node log line.
 	Subscriber LineSubscriber
 	// RecordVersion, when set, is told the profile version a node runs once
@@ -116,6 +117,12 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
+	if opts.FreezeUpgrade && st.Plan != nil {
+		st.Plan.AutoSwap = false
+		if err := saveUpgradeState(labDir, st); err != nil {
+			return err
+		}
+	}
 	s.upgrade, s.completed = st.Plan, st.Completed
 	for _, spec := range specs {
 		n := &node{log: s.log, sub: s, stop: s.stop, wg: &s.wg, spec: spec}
@@ -130,7 +137,9 @@ func Run(ctx context.Context, opts Options) error {
 		}
 		s.reconcile(n, s.upgrade)
 	}
-	s.saveState()
+	if err := s.saveState(); err != nil {
+		return err
+	}
 
 	if err := s.paths.CheckSock(); err != nil {
 		return err
@@ -232,17 +241,26 @@ func (s *supervisor) handle(req Request) (resp Response, quit bool) {
 	case OpExit:
 		s.closing.Store(true)
 		quit = true
+	case OpRecover:
+		if req.Expected == nil || req.Upgrade == nil || req.Upgrade.Recovery == nil || req.Upgrade.AutoSwap {
+			err = errors.New("recovery requires an expected plan and a frozen recovery plan")
+		} else {
+			err = s.replaceUpgrade(req.Expected, req.Upgrade)
+		}
+	case OpRecovered:
+		err = s.finishRecovery(req.Expected)
 	case OpUpgrade:
 		err = s.setUpgrade(req.Upgrade)
 	case OpComplete:
 		if req.Upgrade == nil {
 			err = errors.New("complete: no upgrade named")
 		} else {
-			err = s.complete(req.Upgrade.Name)
+			err = s.completeExpected(req.Upgrade.Name, req.Expected)
 		}
 	default:
 		err = fmt.Errorf("unknown op %q", req.Op)
 	}
+	resp.RecoveryProtocol = 1
 	resp.Nodes = s.statuses()
 	s.upMu.Lock()
 	resp.Upgrade, resp.Completed = s.upgrade, s.completed

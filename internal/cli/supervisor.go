@@ -29,19 +29,21 @@ func labFlag(cmd *cobra.Command, labDir *string) {
 }
 
 func newSupervisorRunCmd() *cobra.Command {
+	var freezeUpgrade bool
 	var labDir string
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Run the supervisor in the foreground until SIGTERM, down, or exit",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			err := supervisor.Run(cmd.Context(), supervisor.Options{LabDir: labDir, Log: cmd.ErrOrStderr(), RecordVersion: recordVersion(labDir)})
+			err := supervisor.Run(cmd.Context(), supervisor.Options{LabDir: labDir, FreezeUpgrade: freezeUpgrade, Log: cmd.ErrOrStderr(), RecordVersion: recordVersion(labDir)})
 			if errors.Is(err, supervisor.ErrAlreadyRunning) {
 				return nil
 			}
 			return err
 		},
 	}
+	cmd.Flags().BoolVar(&freezeUpgrade, "freeze-upgrade", false, "disable automatic upgrade swaps before adopting nodes")
 	labFlag(cmd, &labDir)
 	return cmd
 }

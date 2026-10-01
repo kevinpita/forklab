@@ -29,7 +29,9 @@ const (
 	OpUpgrade Op = "upgrade"
 	// OpComplete ends the pending upgrade Request.Upgrade names once every
 	// node is swapped, keeping it as the completed one.
-	OpComplete Op = "complete"
+	OpComplete  Op = "complete"
+	OpRecover   Op = "recover"
+	OpRecovered Op = "recovered"
 )
 
 const All = "all"
@@ -39,23 +41,25 @@ const All = "all"
 // zero means DefaultStopTimeout. Binary is restart's optional new path and
 // Version the profile version it is, recorded once the node runs on it.
 type Request struct {
-	Op      Op            `json:"op"`
-	Nodes   string        `json:"nodes,omitempty"`
-	Binary  string        `json:"binary,omitempty"`
-	Version string        `json:"version,omitempty"`
-	Timeout time.Duration `json:"timeout_ns,omitempty"`
-	Upgrade *Upgrade      `json:"upgrade,omitempty"`
-	Args    []string      `json:"args,omitempty"`
+	Op       Op            `json:"op"`
+	Nodes    string        `json:"nodes,omitempty"`
+	Binary   string        `json:"binary,omitempty"`
+	Version  string        `json:"version,omitempty"`
+	Timeout  time.Duration `json:"timeout_ns,omitempty"`
+	Upgrade  *Upgrade      `json:"upgrade,omitempty"`
+	Expected *Upgrade      `json:"expected,omitempty"`
+	Args     []string      `json:"args,omitempty"`
 }
 
 // Response carries every node's status, the pending upgrade, and the last
 // completed one after the operation. Error is set when the operation failed
 // for at least one node.
 type Response struct {
-	Error     string       `json:"error,omitempty"`
-	Nodes     []NodeStatus `json:"nodes"`
-	Upgrade   *Upgrade     `json:"upgrade,omitempty"`
-	Completed *Upgrade     `json:"completed,omitempty"`
+	RecoveryProtocol int          `json:"recovery_protocol,omitempty"`
+	Error            string       `json:"error,omitempty"`
+	Nodes            []NodeStatus `json:"nodes"`
+	Upgrade          *Upgrade     `json:"upgrade,omitempty"`
+	Completed        *Upgrade     `json:"completed,omitempty"`
 }
 
 const DefaultStopTimeout = 30 * time.Second

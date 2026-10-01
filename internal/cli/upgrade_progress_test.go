@@ -87,6 +87,9 @@ func TestUpgradeSwapProgressReportsActualNodeStates(t *testing.T) {
 	if _, err = sup.SetUpgrade(&supervisor.Upgrade{Name: "v2", Height: 200, Version: "2.0", Binary: "/bin/sh", AutoSwap: false}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := sup.Start(supervisor.All); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	var detail string

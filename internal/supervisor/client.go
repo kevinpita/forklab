@@ -222,3 +222,15 @@ func lastLines(path string, n int) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+func (c *Client) RecoverUpgrade(expected, next *Upgrade) (Response, error) {
+	return c.send(Request{Op: OpRecover, Expected: expected, Upgrade: next})
+}
+
+func (c *Client) FinishRecovery(expected *Upgrade) (Response, error) {
+	return c.send(Request{Op: OpRecovered, Expected: expected})
+}
+
+func (c *Client) CompleteExpectedUpgrade(expected *Upgrade) (Response, error) {
+	return c.send(Request{Op: OpComplete, Upgrade: expected, Expected: expected})
+}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -84,7 +85,7 @@ func TestUpgradeSwapsEveryHaltedNode(t *testing.T) {
 	if _, err := c.SetUpgrade(plan); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := supervisor.LoadUpgrade(l.dir); err != nil || *got != *plan {
+	if got, err := supervisor.LoadUpgrade(l.dir); err != nil || !reflect.DeepEqual(got, plan) {
 		t.Fatalf("upgrade.json = %+v, %v; want %+v", got, err, plan)
 	}
 	pids := mustStart(t, c, l, supervisor.All)
@@ -121,7 +122,7 @@ func TestUpgradeSwapsEveryHaltedNode(t *testing.T) {
 			t.Errorf("after adoption node %d = %+v, want the swapped pid %d adopted", i, n, nodes[i].PID)
 		}
 	}
-	if st, err := c.Upgrade(); err != nil || st.Upgrade == nil || *st.Upgrade != *plan || st.Completed != nil {
+	if st, err := c.Upgrade(); err != nil || st.Upgrade == nil || !reflect.DeepEqual(st.Upgrade, plan) || st.Completed != nil {
 		t.Errorf("after restart = %+v, %v; want %+v pending", st, err, plan)
 	}
 }
@@ -145,7 +146,7 @@ func TestCompleteUpgradeEndsThePlanOnceEveryNodeSwapped(t *testing.T) {
 	}
 
 	st, err := c.CompleteUpgrade("v2")
-	if err != nil || st.Upgrade != nil || st.Completed == nil || *st.Completed != *plan {
+	if err != nil || st.Upgrade != nil || st.Completed == nil || !reflect.DeepEqual(st.Completed, plan) {
 		t.Fatalf("complete = %+v, %v; want no pending plan and %+v completed", st, err, plan)
 	}
 	for i, n := range st.Nodes {

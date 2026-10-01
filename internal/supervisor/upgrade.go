@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"syscall"
@@ -22,7 +23,21 @@ type Upgrade struct {
 	Binary   string `json:"binary"`
 	AutoSwap bool   `json:"auto_swap"`
 	// ProposalID is the gov proposal that schedules the plan, once known.
-	ProposalID uint64 `json:"proposal_id,omitempty"`
+	ProposalID uint64          `json:"proposal_id,omitempty"`
+	Previous   []UpgradeTarget `json:"previous,omitempty"`
+	Recovery   *Recovery       `json:"recovery,omitempty"`
+}
+
+type UpgradeTarget struct {
+	Index   int    `json:"index"`
+	Binary  string `json:"binary"`
+	Version string `json:"version"`
+}
+
+type Recovery struct {
+	ID      string          `json:"id"`
+	Mode    string          `json:"mode"`
+	Targets []UpgradeTarget `json:"targets"`
 }
 
 // upgradeState is <lab>/upgrade.json: the pending plan, the halt each node
@@ -185,7 +200,7 @@ func (s *supervisor) pending() *Upgrade {
 }
 
 // saveState writes the plan and every node's halt to upgrade.json.
-func (s *supervisor) saveState() {
+func (s *supervisor) saveState() error {
 	s.upMu.Lock()
 	defer s.upMu.Unlock()
 	st := upgradeState{Plan: s.upgrade, Completed: s.completed}
@@ -199,7 +214,9 @@ func (s *supervisor) saveState() {
 	}
 	if err := saveUpgradeState(s.paths.Dir, st); err != nil {
 		s.log.Printf("upgrade.json: %v", err)
+		return err
 	}
+	return nil
 }
 
 // NodeLine forwards every line to the configured subscriber and reacts to
@@ -217,7 +234,7 @@ func (s *supervisor) NodeLine(index int, line string) {
 		return
 	}
 	s.log.Printf("node %d: halted for upgrade %q at height %d", index, h.Name, h.Height)
-	s.saveState()
+	_ = s.saveState()
 	s.swapIfDue(n)
 }
 
@@ -247,7 +264,11 @@ func (s *supervisor) swap(n *node, up Upgrade) {
 	}
 	n.ops.Lock()
 	defer n.ops.Unlock()
-	if s.closing.Load() || !n.beginSwap(up.Name) {
+	s.upMu.Lock()
+	current := s.upgrade
+	allowed := current != nil && current.AutoSwap && current.Name == up.Name && current.Height == up.Height && current.Binary == up.Binary && current.Recovery == nil
+	s.upMu.Unlock()
+	if s.closing.Load() || !allowed || !n.beginSwap(up.Name) {
 		return
 	}
 	index := n.spec.Index
@@ -267,22 +288,65 @@ func (s *supervisor) swap(n *node, up Upgrade) {
 		n.setSwap(SwapDone, nil)
 		s.log.Printf("node %d: swapped to %s", index, up.Binary)
 	}
-	s.saveState()
+	_ = s.saveState()
 }
 
 // setUpgrade replaces the pending upgrade, reconciles every node with it,
 // and persists both.
 func (s *supervisor) setUpgrade(up *Upgrade) error {
+	return s.replaceUpgrade(nil, up)
+}
+
+func (s *supervisor) replaceUpgrade(expected, up *Upgrade) error {
+	if expected != nil {
+		if up == nil || up.Recovery == nil || up.Recovery.ID == "" || up.AutoSwap {
+			return errors.New("recovery requires a frozen plan and attempt identity")
+		}
+		if up.Name != expected.Name || up.Height != expected.Height || len(up.Previous) != len(s.nodes) || len(up.Recovery.Targets) != len(s.nodes) || (up.Recovery.Mode != "previous" && up.Recovery.Mode != "retry") {
+			return errors.New("recovery must preserve the upgrade identity and cover every validator")
+		}
+		if len(expected.Previous) > 0 && !reflect.DeepEqual(up.Previous, expected.Previous) {
+			return errors.New("recovery must preserve original binaries")
+		}
+		for i, target := range up.Recovery.Targets {
+			if target.Index != i || target.Version == "" || up.Previous[i].Index != i || up.Previous[i].Version == "" {
+				return errors.New("invalid recovery binary record")
+			}
+		}
+	}
 	if up != nil {
-		if err := isExecutable(up.Binary); err != nil {
-			return err
+		if up.Recovery == nil {
+			if err := isExecutable(up.Binary); err != nil {
+				return err
+			}
+		} else {
+			for _, target := range up.Recovery.Targets {
+				if err := isExecutable(target.Binary); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	s.planOps.Lock()
 	defer s.planOps.Unlock()
 	s.upMu.Lock()
+	old := s.upgrade
+	if expected != nil && !reflect.DeepEqual(old, expected) {
+		s.upMu.Unlock()
+		return errors.New("pending upgrade changed; reload its status before recovery")
+	}
+	if expected == nil && old != nil && old.Recovery != nil {
+		s.upMu.Unlock()
+		return errors.New("upgrade recovery is pending; use upgrade recover")
+	}
 	s.upgrade = up
 	s.upMu.Unlock()
+	if err := s.saveState(); err != nil {
+		s.upMu.Lock()
+		s.upgrade = old
+		s.upMu.Unlock()
+		return err
+	}
 	if up == nil {
 		s.log.Printf("upgrade cleared")
 	} else {
@@ -291,28 +355,34 @@ func (s *supervisor) setUpgrade(up *Upgrade) error {
 	for _, n := range s.nodes {
 		s.reconcile(n, up)
 	}
-	s.saveState()
-	return nil
+	return s.saveState()
 }
 
 // complete moves the pending upgrade named name to completed once every
 // node is swapped, and forgets the halts. The caller has seen the chain go
 // past the plan height, which the supervisor cannot see. Completing the
 // last completed upgrade again changes nothing.
-func (s *supervisor) complete(name string) error {
+func (s *supervisor) complete(name string) error { return s.completeExpected(name, nil) }
+
+func (s *supervisor) completeExpected(name string, expected *Upgrade) error {
 	s.planOps.Lock()
 	defer s.planOps.Unlock()
 	s.upMu.Lock()
 	up, done := s.upgrade, s.completed
 	s.upMu.Unlock()
+	if expected != nil && !reflect.DeepEqual(up, expected) {
+		return errors.New("pending upgrade changed before completion")
+	}
 	switch {
 	case up == nil && done != nil && done.Name == name:
 		return nil
+	case up != nil && up.Recovery != nil:
+		return errors.New("upgrade recovery must verify its own completion")
 	case up == nil || up.Name != name:
 		return fmt.Errorf("upgrade %q is not pending", name)
 	}
 	for _, n := range s.nodes {
-		if phase, _ := n.swapState(); phase != SwapDone {
+		if phase, _ := n.swapState(); phase != SwapDone || n.status().State != StateRunning || n.status().Binary != up.Binary {
 			return fmt.Errorf("upgrade %q: %s is not swapped", name, n.spec.Name)
 		}
 	}
@@ -323,8 +393,7 @@ func (s *supervisor) complete(name string) error {
 	for _, n := range s.nodes {
 		s.reconcile(n, nil)
 	}
-	s.saveState()
-	return nil
+	return s.saveState()
 }
 
 // reconcile converges one node with the pending upgrade. A node on the
@@ -367,7 +436,7 @@ func (s *supervisor) settleSwap(n *node, binary string) {
 	default:
 		return
 	}
-	s.saveState()
+	_ = s.saveState()
 }
 
 // persistBinary makes binary the node's next start and records version,
@@ -396,4 +465,65 @@ func isExecutable(path string) error {
 		return fmt.Errorf("%s is not an executable file", path)
 	}
 	return nil
+}
+
+// LoadUpgradeStatus reads persisted evidence without starting a supervisor.
+func LoadUpgradeStatus(dir string) (Response, error) {
+	st, err := loadUpgradeState(dir)
+	if err != nil {
+		return Response{}, err
+	}
+	specs, err := LoadNodes(dir)
+	if err != nil {
+		return Response{}, err
+	}
+	out := Response{Upgrade: st.Plan, Completed: st.Completed}
+	for _, spec := range specs {
+		n := NodeStatus{Index: spec.Index, Name: spec.Name, Binary: spec.Binary, State: StateStopped}
+		if h, ok := st.Halts[spec.Index]; ok {
+			n.Halt = &h
+			n.Upgrade = SwapHalted
+		}
+		out.Nodes = append(out.Nodes, n)
+	}
+	return out, nil
+}
+
+func (s *supervisor) finishRecovery(expected *Upgrade) error {
+	s.planOps.Lock()
+	defer s.planOps.Unlock()
+	s.upMu.Lock()
+	up := s.upgrade
+	s.upMu.Unlock()
+	if expected == nil || up == nil || up.Recovery == nil || !reflect.DeepEqual(up, expected) {
+		return errors.New("pending recovery changed")
+	}
+	for _, target := range up.Recovery.Targets {
+		if target.Index < 0 || target.Index >= len(s.nodes) {
+			return errors.New("invalid recovery target")
+		}
+		n := s.nodes[target.Index].status()
+		if n.State != StateRunning || n.Binary != target.Binary {
+			return fmt.Errorf("%s is not running the recovery binary", n.Name)
+		}
+	}
+	s.upMu.Lock()
+	oldDone := s.completed
+	s.upgrade = nil
+	if up.Recovery.Mode == "retry" {
+		done := *up
+		done.Recovery = nil
+		s.completed = &done
+	}
+	s.upMu.Unlock()
+	if err := s.saveState(); err != nil {
+		s.upMu.Lock()
+		s.upgrade, s.completed = up, oldDone
+		s.upMu.Unlock()
+		return err
+	}
+	for _, n := range s.nodes {
+		s.reconcile(n, nil)
+	}
+	return s.saveState()
 }
