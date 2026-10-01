@@ -94,9 +94,10 @@ func newBinaryResolveCmd(a *app, rebuild bool) *cobra.Command {
 	var profileName string
 	var noVerify bool
 	cmd := &cobra.Command{
-		Use:   "fetch <version>",
-		Short: "Resolve a profile's binary version into the cache, downloading or building it if needed",
-		Args:  cobra.ExactArgs(1),
+		ValidArgsFunction: completeProfileVersions,
+		Use:               "fetch <version>",
+		Short:             "Resolve a profile's binary version into the cache, downloading or building it if needed",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := profile.DefaultStore()
 			if err != nil {

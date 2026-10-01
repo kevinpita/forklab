@@ -92,9 +92,10 @@ func (u labUp) WriteHuman(w io.Writer) error {
 func newLabUpCmd(a *app) *cobra.Command {
 	var timeout time.Duration
 	cmd := &cobra.Command{
-		Use:   "up <name>",
-		Short: "Start a lab's supervisor and nodes and wait for blocks",
-		Args:  cobra.ExactArgs(1),
+		ValidArgsFunction: completeLabs,
+		Use:               "up <name>",
+		Short:             "Start a lab's supervisor and nodes and wait for blocks",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			l, err := labs()
 			if err != nil {
@@ -209,9 +210,10 @@ func (d labDown) WriteHuman(w io.Writer) error {
 func newLabDownCmd(a *app) *cobra.Command {
 	var timeout time.Duration
 	cmd := &cobra.Command{
-		Use:   "down <name>",
-		Short: "Stop a lab's nodes and supervisor",
-		Args:  cobra.ExactArgs(1),
+		ValidArgsFunction: completeLabs,
+		Use:               "down <name>",
+		Short:             "Stop a lab's nodes and supervisor",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			l, err := labs()
 			if err != nil {
@@ -256,9 +258,10 @@ func (r labReset) WriteHuman(w io.Writer) error {
 func newLabResetCmd(a *app) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
-		Use:   "reset <name>",
-		Short: "Wipe every node's chain data so the lab replays from genesis",
-		Args:  cobra.ExactArgs(1),
+		ValidArgsFunction: completeLabs,
+		Use:               "reset <name>",
+		Short:             "Wipe every node's chain data so the lab replays from genesis",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			l, err := labs()
 			if err != nil {

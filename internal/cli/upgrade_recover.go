@@ -85,6 +85,7 @@ func newUpgradeRecoverCmd(a *app, ref *string) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&previous, "previous", false, "return to original binaries and skip this upgrade height")
 	cmd.Flags().StringVar(&version, "version", "", "retry the upgrade with this profile version")
+	registerCompletion(cmd, "version", completeLabVersions)
 	cmd.Flags().StringVar(&format, "progress", "", "live progress on stderr (json)")
 	return cmd
 }

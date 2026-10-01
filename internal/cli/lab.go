@@ -195,6 +195,7 @@ func newLabCreateCmd(a *app) *cobra.Command {
 	binaries.register(cmd.Flags())
 	cmd.Flags().StringVar(&profileName, "profile", "", "profile name (required)")
 	cmd.Flags().StringVar(&in.Version, "version", "", "binary version every node starts with (required)")
+	registerCompletion(cmd, "version", completeProfileVersions)
 	cmd.Flags().IntVar(&in.Validators, "validators", 2, "number of validator nodes")
 	cmd.Flags().IntVar(&in.TestAccounts, "test-accounts", 5, "number of funded test accounts")
 	cmd.Flags().StringVar(&in.ChainID, "chain-id", "", "chain ID (default: the profile's)")
@@ -409,9 +410,10 @@ func newLabListCmd(a *app) *cobra.Command {
 func newLabShowCmd(a *app) *cobra.Command {
 	var showMnemonics bool
 	cmd := &cobra.Command{
-		Use:   "show <name>",
-		Short: "Show a lab's nodes, ports, and keys",
-		Args:  cobra.ExactArgs(1),
+		ValidArgsFunction: completeLabs,
+		Use:               "show <name>",
+		Short:             "Show a lab's nodes, ports, and keys",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			l, err := labs()
 			if err != nil {
@@ -454,9 +456,10 @@ func (d labDeleted) WriteHuman(w io.Writer) error {
 
 func newLabDeleteCmd(a *app) *cobra.Command {
 	return &cobra.Command{
-		Use:   "delete <name>",
-		Short: "Delete a stopped lab and everything in its directory",
-		Args:  cobra.ExactArgs(1),
+		ValidArgsFunction: completeLabs,
+		Use:               "delete <name>",
+		Short:             "Delete a stopped lab and everything in its directory",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			l, err := labs()
 			if err != nil {

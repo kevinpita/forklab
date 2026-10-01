@@ -122,9 +122,10 @@ func newProfileListCmd(a *app) *cobra.Command {
 
 func newProfileShowCmd(a *app) *cobra.Command {
 	return &cobra.Command{
-		Use:   "show <name>",
-		Short: "Print a profile as YAML",
-		Args:  cobra.ExactArgs(1),
+		ValidArgsFunction: completeProfiles,
+		Use:               "show <name>",
+		Short:             "Print a profile as YAML",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := profile.DefaultStore()
 			if err != nil {
@@ -141,10 +142,11 @@ func newProfileShowCmd(a *app) *cobra.Command {
 
 func newProfileValidateCmd(a *app) *cobra.Command {
 	return &cobra.Command{
-		Use:   "validate <file|name>",
-		Short: "Validate a profile file, or a stored profile by name",
-		Long:  "An argument containing a path separator or ending in .yaml or .yml is a file; anything else is a profile name.",
-		Args:  cobra.ExactArgs(1),
+		ValidArgsFunction: completeProfileFile,
+		Use:               "validate <file|name>",
+		Short:             "Validate a profile file, or a stored profile by name",
+		Long:              "An argument containing a path separator or ending in .yaml or .yml is a file; anything else is a profile name.",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			arg := args[0]
 			if strings.ContainsRune(arg, os.PathSeparator) || strings.HasSuffix(arg, ".yaml") || strings.HasSuffix(arg, ".yml") {
@@ -204,14 +206,16 @@ func newProfileCreateCmd(a *app) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&from, "from", "", "clone this profile (user or built-in) as the starting point")
 	f.register(cmd.Flags())
+	registerCompletion(cmd, "from", completeProfiles)
 	return cmd
 }
 
 func newProfileEditCmd(a *app) *cobra.Command {
 	var f docFlags
 	cmd := &cobra.Command{
-		Use:   "edit <name>",
-		Short: "Change fields of a profile; editing a built-in saves a user copy that shadows it",
+		ValidArgsFunction: completeProfiles,
+		Use:               "edit <name>",
+		Short:             "Change fields of a profile; editing a built-in saves a user copy that shadows it",
 		Long: "Change fields of a profile; editing a built-in saves a user copy that shadows it.\n" +
 			"The profile is rewritten from its parsed fields, so YAML comments and formatting are not preserved.",
 		Args: cobra.ExactArgs(1),
@@ -248,9 +252,10 @@ func newProfileEditCmd(a *app) *cobra.Command {
 
 func newProfileDeleteCmd(a *app) *cobra.Command {
 	return &cobra.Command{
-		Use:   "delete <name>",
-		Short: "Delete a user profile",
-		Args:  cobra.ExactArgs(1),
+		ValidArgsFunction: completeProfiles,
+		Use:               "delete <name>",
+		Short:             "Delete a user profile",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := profile.DefaultStore()
 			if err != nil {

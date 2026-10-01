@@ -91,9 +91,10 @@ func newNodeListCmd(a *app, labDir *string) *cobra.Command {
 
 func newNodeStartCmd(a *app, labDir *string) *cobra.Command {
 	return &cobra.Command{
-		Use:   "start <i|all>",
-		Short: "Start a node, or all of them",
-		Args:  nodeArg,
+		ValidArgsFunction: completeNodes(true),
+		Use:               "start <i|all>",
+		Short:             "Start a node, or all of them",
+		Args:              nodeArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireUnpaused(*labDir); err != nil {
 				return err
@@ -114,9 +115,10 @@ func newNodeStartCmd(a *app, labDir *string) *cobra.Command {
 func newNodeStopCmd(a *app, labDir *string) *cobra.Command {
 	var timeout time.Duration
 	cmd := &cobra.Command{
-		Use:   "stop <i|all>",
-		Short: "Stop a node with SIGTERM and wait for it to exit",
-		Args:  nodeArg,
+		ValidArgsFunction: completeNodes(true),
+		Use:               "stop <i|all>",
+		Short:             "Stop a node with SIGTERM and wait for it to exit",
+		Args:              nodeArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := ensureSupervisor(cmd.Context(), *labDir)
 			if err != nil {
@@ -135,9 +137,10 @@ func newNodeStopCmd(a *app, labDir *string) *cobra.Command {
 
 func newNodeKillCmd(a *app, labDir *string) *cobra.Command {
 	return &cobra.Command{
-		Use:   "kill <i|all>",
-		Short: "Kill a node with SIGKILL to simulate a crash",
-		Args:  nodeArg,
+		ValidArgsFunction: completeNodes(true),
+		Use:               "kill <i|all>",
+		Short:             "Kill a node with SIGKILL to simulate a crash",
+		Args:              nodeArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := ensureSupervisor(cmd.Context(), *labDir)
 			if err != nil {
@@ -156,9 +159,10 @@ func newNodeRestartCmd(a *app, labDir *string) *cobra.Command {
 	var timeout time.Duration
 	var binary, version string
 	cmd := &cobra.Command{
-		Use:   "restart <i|all>",
-		Short: "Stop a node and start it again, optionally with another binary",
-		Args:  nodeArg,
+		ValidArgsFunction: completeNodes(true),
+		Use:               "restart <i|all>",
+		Short:             "Stop a node and start it again, optionally with another binary",
+		Args:              nodeArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireUnpaused(*labDir); err != nil {
 				return err
@@ -181,6 +185,8 @@ func newNodeRestartCmd(a *app, labDir *string) *cobra.Command {
 	cmd.Flags().DurationVar(&timeout, "timeout", supervisor.DefaultStopTimeout, "how long to wait for the node to exit")
 	cmd.Flags().StringVar(&binary, "binary", "", "binary to run from now on: a version of the lab's profile, or a path containing a slash")
 	cmd.Flags().StringVar(&version, "version", "", "profile version a --binary path is, recorded in lab.yaml")
+	registerCompletion(cmd, "version", completeLabVersions)
+	registerCompletion(cmd, "binary", completeLabBinary)
 	return cmd
 }
 
@@ -202,9 +208,10 @@ func newNodeLogsCmd(a *app, labDir *string) *cobra.Command {
 		last   int
 	)
 	cmd := &cobra.Command{
-		Use:   "logs <i>",
-		Short: "Print a node's log; --json emits one object per line",
-		Args:  cobra.ExactArgs(1),
+		ValidArgsFunction: completeNodes(false),
+		Use:               "logs <i>",
+		Short:             "Print a node's log; --json emits one object per line",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			specs, err := supervisor.LoadNodes(*labDir)
 			if err != nil {

@@ -10,7 +10,9 @@ import (
 
 // unreachable are the CLI commands the TUI does not offer, with why.
 var unreachable = map[string]string{
-	"tui": "it is the TUI",
+	"tui":        "it is the TUI",
+	"completion": "prints shell code for installation outside the TUI",
+	"shell init": "prints shell code for installation outside the TUI",
 }
 
 // labStates are one model per state a lab can be in: running (with a

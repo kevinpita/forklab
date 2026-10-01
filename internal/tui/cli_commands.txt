@@ -3,6 +3,7 @@ account send
 binary build
 binary fetch
 binary list
+completion
 consensus
 exec
 gov draft
@@ -37,6 +38,7 @@ runbook run
 runbook show
 runbook validate
 runbook write
+shell init
 status
 store
 tui

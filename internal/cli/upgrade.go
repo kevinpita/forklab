@@ -128,8 +128,9 @@ func newUpgradeScheduleCmd(a *app, ref *string) *cobra.Command {
 	var f scheduleFlags
 	var progressFormat string
 	cmd := &cobra.Command{
-		Use:   "schedule <version> (--height H | --in N)",
-		Short: "Upgrade the lab to a profile version through governance",
+		ValidArgsFunction: completeLabVersions,
+		Use:               "schedule <version> (--height H | --in N)",
+		Short:             "Upgrade the lab to a profile version through governance",
 		Long: "Resolve the binary for version, submit a software upgrade proposal for it\n" +
 			"at --height or --in blocks from now, vote it through, and hand the plan to\n" +
 			"the supervisor, which restarts each node on the new binary when it halts.\n" +

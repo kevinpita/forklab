@@ -50,6 +50,7 @@ func newLabPauseCmd(a *app) *cobra.Command {
 		}
 		return a.print(cmd, pauseView{Height: st.Height, Phase: st.Phase})
 	}}
+	cmd.ValidArgsFunction = completeLabs
 	cmd.Flags().Int64Var(&height, "height", 0, "exact committed height to freeze (required)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 2*time.Minute, "time limit to reach and verify the pause")
 	_ = cmd.MarkFlagRequired("height")
@@ -73,6 +74,7 @@ func newLabResumeCmd(a *app) *cobra.Command {
 		}
 		return a.print(cmd, pauseView{Phase: "resumed"})
 	}}
+	cmd.ValidArgsFunction = completeLabs
 	cmd.Flags().DurationVar(&timeout, "timeout", 2*time.Minute, "time limit to restart and observe a new commit")
 	return cmd
 }

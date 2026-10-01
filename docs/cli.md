@@ -28,10 +28,15 @@ run `forklab gov list` again after that to see it as `PASSED`.
 Commands that act on a running lab take `--lab <name>` (a lab name or
 directory). Without it they use the running lab, or the only lab on disk.
 
+For tab completion and the `fl`, `flab`, and `flogs` helpers, see
+[shell integration](shell.md).
+
 ## Commands
 
 | Command | What it does |
 |---------|--------------|
+| `completion <bash\|zsh\|fish\|powershell>` | Print a completion script |
+| `shell init <bash\|zsh\|fish>` | Print completions and shell helpers |
 | `profile create <name>` | Create a user profile from flags, optionally cloning one with `--from` |
 | `profile edit <name>` | Change profile fields; editing a built-in saves a user copy |
 | `profile validate <file\|name>` | Validate a profile file or a stored profile |
@@ -86,7 +91,7 @@ manual resume, and raw store inspection.
 
 forklab is built for scripts and agents as well as people:
 
-- Every command accepts `--json` and then prints one envelope on stdout,
+- Data commands accept `--json` and then print one envelope on stdout,
   `{"ok":true,"data":{...}}` or
   `{"ok":false,"error":{"code":"usage","message":"..."}}`.
 - Streaming commands (`status -w`, `consensus -w`, `node logs`) print one
@@ -98,6 +103,8 @@ forklab is built for scripts and agents as well as people:
 > [!IMPORTANT]
 > Help (`forklab help`, `--help`) always prints text. `forklab` with no
 > command opens the TUI, so `forklab --json` alone is a usage error.
+> `completion` and `shell init` print shell code and reject `--json` with a
+> usage error envelope.
 
 ## Files
 
