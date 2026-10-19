@@ -58,6 +58,11 @@ install forklab ~/.local/bin/
 forklab version
 ```
 
+With Nix, run `nix run github:kevinpita/forklab`. The flake also exports
+`overlays.default`, which adds `pkgs.forklab`. The package installs shell
+completions and the agent skill at `share/forklab/.agents/skills/forklab`.
+The version that the package reports is the commit hash.
+
 > [!NOTE]
 > A `go install` build reports its version as `dev`.
 

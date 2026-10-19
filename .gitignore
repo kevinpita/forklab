@@ -5,3 +5,4 @@ devenv.local.nix
 .claude/
 docs/specs/
 /dist/
+/result*
