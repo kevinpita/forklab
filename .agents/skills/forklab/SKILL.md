@@ -1,6 +1,6 @@
 ---
 name: forklab
-description: Operate the forklab CLI to inspect or manage local Cosmos SDK labs, fork snapshots, submit governance proposals, rehearse or recover upgrades, and run state-verification recipes.
+description: "Use for any localnet or local chain work on Cosmos SDK chains: start a lab from a fresh genesis or a fork snapshot, with a release binary or one built from a local checkout, test an upgrade path, submit governance proposals, rehearse or recover upgrades, and run state-verification recipes."
 ---
 
 # Operate forklab
