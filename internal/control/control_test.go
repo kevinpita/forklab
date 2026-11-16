@@ -109,7 +109,10 @@ while :;do sleep 0.05;done
 		}
 		cancel()
 		select {
-		case <-done:
+		case err := <-done:
+			if err != nil {
+				t.Error(err)
+			}
 		case <-time.After(3 * time.Second):
 			t.Error("supervisor did not exit")
 		}

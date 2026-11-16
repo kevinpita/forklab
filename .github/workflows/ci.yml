@@ -19,6 +19,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: 1.27.x
+          check-latest: true
       - uses: extractions/setup-just@v4
       - name: gofumpt
         run: |
@@ -27,7 +28,7 @@ jobs:
           git diff --exit-code
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.13.2
+          version: v2.15.0
       - name: test
         run: just test
       - name: build
