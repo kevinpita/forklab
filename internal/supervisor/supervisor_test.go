@@ -215,6 +215,22 @@ func TestSecondSupervisorExitsQuietly(t *testing.T) {
 	}
 }
 
+// A supervisor killed with SIGKILL can hold supervisor.lock for a moment
+// after it looks gone, so the first supervisor spawned then exits quietly.
+func TestEnsureRunningOutlastsADyingLockHolder(t *testing.T) {
+	h := newHarness(t)
+	l := h.lab(1)
+	lock, err := os.OpenFile(supervisor.Paths{Dir: l.dir}.Lock(), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	time.AfterFunc(500*time.Millisecond, func() { _ = lock.Close() })
+	up(t, l)
+}
+
 func TestNodeLifecycle(t *testing.T) {
 	h := newHarness(t)
 	l := h.lab(2)

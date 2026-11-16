@@ -161,6 +161,10 @@ func ForklabSpawner(labDir string) (*exec.Cmd, error) {
 // readyTimeout bounds how long EnsureRunning waits for a spawned supervisor.
 const readyTimeout = 5 * time.Second
 
+// respawnDelay is how long EnsureRunning waits after a spawned supervisor
+// exits quietly before it spawns another.
+const respawnDelay = 100 * time.Millisecond
+
 // EnsureRunning returns a client for labDir's supervisor, spawning one
 // detached when none answers. Another lab holding active.lock is an error
 // naming that lab.
@@ -177,17 +181,25 @@ func EnsureRunning(ctx context.Context, labDir string, spawn Spawner) (*Client, 
 	} else if !errors.Is(err, errLocked) {
 		return nil, err
 	}
-	cmd, err := spawn(labDir)
+	paths := Paths{labDir}
+	start := func() (<-chan error, error) {
+		cmd, err := spawn(labDir)
+		if err != nil {
+			return nil, err
+		}
+		cmd.Dir = labDir
+		if err := detach(cmd, paths.Log()); err != nil {
+			return nil, fmt.Errorf("start supervisor: %w", err)
+		}
+		exited := make(chan error, 1)
+		go func() { exited <- cmd.Wait() }()
+		return exited, nil
+	}
+	exited, err := start()
 	if err != nil {
 		return nil, err
 	}
-	paths := Paths{labDir}
-	cmd.Dir = labDir
-	if err := detach(cmd, paths.Log()); err != nil {
-		return nil, fmt.Errorf("start supervisor: %w", err)
-	}
-	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
+	var respawn <-chan time.Time
 
 	timeout := time.After(readyTimeout)
 	for {
@@ -198,12 +210,19 @@ func EnsureRunning(ctx context.Context, labDir string, spawn Spawner) (*Client, 
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case err := <-exited:
-			// A clean exit is the quiet second instance: another supervisor
-			// holds the lock and is coming up, so keep waiting for it.
+			// A clean exit is the quiet second instance: supervisor.lock was
+			// held. The holder is a supervisor that is coming up, or a killed
+			// one whose lock the kernel has not released yet. Only another
+			// spawn recovers from the second case.
 			if err != nil {
 				return nil, fmt.Errorf("supervisor exited: %w\n%s", err, lastLines(paths.Log(), 5))
 			}
-			exited = nil
+			exited, respawn = nil, time.After(respawnDelay)
+		case <-respawn:
+			if exited, err = start(); err != nil {
+				return nil, err
+			}
+			respawn = nil
 		case <-timeout:
 			return nil, fmt.Errorf("supervisor did not answer within %s; see %s\n%s", readyTimeout, paths.Log(), lastLines(paths.Log(), 5))
 		case <-time.After(25 * time.Millisecond):
