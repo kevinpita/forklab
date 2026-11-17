@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"sync"
 	"syscall"
 	"time"
@@ -43,19 +42,19 @@ type NodeStatus struct {
 	SwapError string    `json:"swap_error,omitempty"`
 }
 
-// process is one live node process. cmd is nil for adopted processes, whose
-// exit is observed by polling instead of wait(2). done closes when the exit
-// is observed; tailDone closes once the log tail has drained after it, or
-// stopped with the supervisor; gone closes once the exit is recorded, when
-// the node no longer reads as running.
+// process is one live node process. pf is what the runtime knows it by, as
+// read or written when the process was attached. adopted is set for a
+// process found via its pid file, whose exit the runtime watches for instead
+// of waiting on it. done closes when the exit is observed; tailDone closes
+// once the log tail has drained after it, or stopped with the supervisor;
+// gone closes once the exit is recorded, when the node no longer reads as
+// running.
 type process struct {
-	pid       int
-	binary    string
-	startedAt time.Time
-	cmd       *exec.Cmd
-	done      chan struct{}
-	tailDone  chan struct{}
-	gone      chan struct{}
+	pf       pidFile
+	adopted  bool
+	done     chan struct{}
+	tailDone chan struct{}
+	gone     chan struct{}
 }
 
 type exitInfo struct {
@@ -65,22 +64,22 @@ type exitInfo struct {
 }
 
 // node owns one NodeSpec's process. ops serializes lifecycle operations
-// (start, stop, kill, restart, swap); mu guards spec, proc, adopted, last,
-// and the swap fields. spec.Binary is the path the next start uses; a
-// running process may have been started with another one. The log tail and
-// the adopted-process poll run under wg and end when stop closes, so a
+// (start, stop, kill, restart, swap); mu guards spec, proc, last, and the
+// swap fields. spec.Binary is the path the next start uses; a running
+// process may have been started with another one. The log tail and the
+// watch of an adopted process run under wg and end when stop closes, so a
 // supervisor that has left touches nothing.
 type node struct {
 	log  *log.Logger
 	sub  LineSubscriber
 	stop <-chan struct{}
 	wg   *sync.WaitGroup
+	rt   runtime
 
 	ops     sync.Mutex
 	mu      sync.Mutex
 	spec    NodeSpec
 	proc    *process
-	adopted bool
 	last    *exitInfo
 	swap    SwapPhase
 	halt    *Halt
@@ -96,11 +95,11 @@ func (n *node) status() NodeStatus {
 		st.Halt = &halt
 	}
 	if p := n.proc; p != nil {
-		started := p.startedAt
+		started := p.pf.StartedAt
 		st.State = StateRunning
-		st.PID = p.pid
-		st.Binary = p.binary
-		st.Adopted = n.adopted
+		st.PID = p.pf.PID
+		st.Binary = p.pf.Binary
+		st.Adopted = p.adopted
 		st.StartedAt = &started
 		st.UptimeSeconds = int64(time.Since(started).Seconds())
 	} else if e := n.last; e != nil {
@@ -125,35 +124,35 @@ func (n *node) currentSpec() NodeSpec {
 	return n.spec
 }
 
-// start spawns the node detached. A running node is left as it is. The
-// caller holds ops.
+// start launches the node. A running node is left as it is. The caller
+// holds ops.
 func (n *node) start() error {
 	if n.running() != nil {
 		return nil
 	}
 	spec := n.currentSpec()
-	pf := pidFile{Binary: spec.Binary, LogOffset: fileSize(spec.LogPath)}
-	cmd := exec.Command(spec.Binary, spec.Args...)
-	cmd.Dir = spec.Home
-	if err := detach(cmd, spec.LogPath); err != nil {
+	logEnd := fileSize(spec.LogPath)
+	pf, wait, err := n.rt.start(spec)
+	if err != nil {
 		return fmt.Errorf("start node %d: %w", spec.Index, err)
 	}
-	pf.PID, pf.StartedAt = cmd.Process.Pid, time.Now()
+	pf.LogOffset = logEnd
 	if err := writePidFile(spec.PidPath, pf); err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		_ = n.rt.signal(pf, syscall.SIGKILL)
+		wait()
 		return fmt.Errorf("start node %d: %w", spec.Index, err)
 	}
-	p := n.attach(pf, cmd, false)
-	n.log.Printf("node %d: started pid %d with %s", spec.Index, p.pid, p.binary)
-	go n.waitChild(p)
+	p := n.attach(pf, false)
+	n.log.Printf("node %d: started pid %d with %s", spec.Index, pf.PID, pf.Binary)
+	go func() { n.exited(p, wait()) }()
 	return nil
 }
 
-// adopt takes over the process recorded in the pid file. A pid that is gone,
-// or whose cmdline does not name the recorded binary and this node's home
-// (a recycled pid), means the node exited while no supervisor watched: its
-// remaining log lines are delivered, then it is marked exited.
+// adopt takes over the process recorded in the pid file. One the runtime no
+// longer finds alive (for a host process: the pid is gone, or its cmdline
+// does not name the recorded binary and this node's home, a recycled pid)
+// means the node exited while no supervisor watched: its remaining log
+// lines are delivered, then it is marked exited.
 func (n *node) adopt() error {
 	spec := n.currentSpec()
 	pf, err := readPidFile(spec.PidPath)
@@ -163,25 +162,28 @@ func (n *node) adopt() error {
 	if err != nil {
 		return err
 	}
-	if !alive(pf.PID) || !cmdlineMatches(pf.PID, pf.Binary, spec.Home) {
+	p := n.attach(pf, true)
+	if !n.rt.alive(spec, pf) {
 		n.log.Printf("node %d: pid %d from %s is gone", spec.Index, pf.PID, spec.PidPath)
-		p := n.attach(pf, nil, true)
 		n.exited(p, exitInfo{at: time.Now()})
 		return nil
 	}
-	p := n.attach(pf, nil, true)
-	n.log.Printf("node %d: adopted pid %d running %s", spec.Index, p.pid, p.binary)
-	n.wg.Go(func() { n.pollAdopted(p) })
+	n.log.Printf("node %d: adopted pid %d running %s", spec.Index, pf.PID, pf.Binary)
+	n.wg.Go(func() {
+		if n.rt.watch(spec, pf, n.stop) {
+			n.exited(p, exitInfo{at: time.Now()})
+		}
+	})
 	return nil
 }
 
 // attach records pf as the running process and starts delivering its log
 // from pf.LogOffset, persisting the delivered offset back into the pid file
 // so the next supervisor resumes there.
-func (n *node) attach(pf pidFile, cmd *exec.Cmd, adopted bool) *process {
-	p := &process{pid: pf.PID, binary: pf.Binary, startedAt: pf.StartedAt, cmd: cmd, done: make(chan struct{}), tailDone: make(chan struct{}), gone: make(chan struct{})}
+func (n *node) attach(pf pidFile, adopted bool) *process {
+	p := &process{pf: pf, adopted: adopted, done: make(chan struct{}), tailDone: make(chan struct{}), gone: make(chan struct{})}
 	n.mu.Lock()
-	n.proc, n.adopted, n.last = p, adopted, nil
+	n.proc, n.last = p, nil
 	spec := n.spec
 	n.mu.Unlock()
 	if n.sub == nil {
@@ -204,37 +206,6 @@ func (n *node) attach(pf pidFile, cmd *exec.Cmd, adopted bool) *process {
 	return p
 }
 
-func (n *node) waitChild(p *process) {
-	err := p.cmd.Wait()
-	e := exitInfo{at: time.Now()}
-	var exitErr *exec.ExitError
-	if ws, ok := p.cmd.ProcessState.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
-		e.signal = ws.Signal().String()
-	} else if err == nil || errors.As(err, &exitErr) {
-		code := p.cmd.ProcessState.ExitCode()
-		e.code = &code
-	}
-	n.exited(p, e)
-}
-
-// pollAdopted watches a process this supervisor cannot wait(2) on. The
-// cmdline check makes a recycled pid, or a zombie whose cmdline is empty,
-// count as exited.
-func (n *node) pollAdopted(p *process) {
-	for n.adoptedAlive(p) {
-		select {
-		case <-n.stop:
-			return
-		case <-time.After(200 * time.Millisecond):
-		}
-	}
-	n.exited(p, exitInfo{at: time.Now()})
-}
-
-func (n *node) adoptedAlive(p *process) bool {
-	return alive(p.pid) && cmdlineMatches(p.pid, p.binary, n.spec.Home)
-}
-
 // exited lets the tail drain what the process wrote, then records the exit
 // and removes the pid file. Until then the node still reads as running, so
 // signal waits for gone before its caller may start a new process.
@@ -251,11 +222,11 @@ func (n *node) exited(p *process, e exitInfo) {
 	close(p.gone)
 	switch {
 	case e.signal != "":
-		n.log.Printf("node %d: pid %d ended by signal %s", index, p.pid, e.signal)
+		n.log.Printf("node %d: pid %d ended by signal %s", index, p.pf.PID, e.signal)
 	case e.code != nil:
-		n.log.Printf("node %d: pid %d exited with code %d", index, p.pid, *e.code)
+		n.log.Printf("node %d: pid %d exited with code %d", index, p.pf.PID, *e.code)
 	default:
-		n.log.Printf("node %d: pid %d exited while unwatched", index, p.pid)
+		n.log.Printf("node %d: pid %d exited while unwatched", index, p.pf.PID)
 	}
 }
 
@@ -266,18 +237,18 @@ func (n *node) signal(sig syscall.Signal, timeout time.Duration) error {
 	if p == nil {
 		return nil
 	}
-	if p.cmd == nil && !n.adoptedAlive(p) {
+	if p.adopted && !n.rt.alive(n.currentSpec(), p.pf) {
 		<-p.gone
 		return nil
 	}
-	if err := syscall.Kill(p.pid, sig); err != nil && !errors.Is(err, syscall.ESRCH) {
+	if err := n.rt.signal(p.pf, sig); err != nil {
 		return fmt.Errorf("signal node %d: %w", n.spec.Index, err)
 	}
 	select {
 	case <-p.gone:
 		return nil
 	case <-time.After(timeout):
-		return fmt.Errorf("node %d (pid %d) still running %s after %s", n.spec.Index, p.pid, timeout, sig)
+		return fmt.Errorf("node %d (pid %d) still running %s after %s", n.spec.Index, p.pf.PID, timeout, sig)
 	}
 }
 

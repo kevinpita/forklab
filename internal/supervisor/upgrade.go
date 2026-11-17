@@ -156,7 +156,7 @@ func (n *node) markHalted(h Halt) bool {
 	}
 	h.Binary = n.spec.Binary
 	if n.proc != nil {
-		h.Binary = n.proc.binary
+		h.Binary = n.proc.pf.Binary
 	}
 	n.halt, n.swap, n.swapErr = &h, SwapHalted, ""
 	return true

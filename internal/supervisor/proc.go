@@ -1,14 +1,11 @@
 package supervisor
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
-	"slices"
-	"strconv"
 	"syscall"
 	"time"
 )
@@ -69,7 +66,7 @@ func LiveNodes(labDir string) ([]int, error) {
 		if err != nil {
 			return nil, err
 		}
-		if alive(pf.PID) && cmdlineMatches(pf.PID, pf.Binary, s.Home) {
+		if runtimeOf(s).alive(s, pf) {
 			live = append(live, s.Index)
 		}
 	}
@@ -98,16 +95,4 @@ func alive(pid int) bool {
 	}
 	err := syscall.Kill(pid, 0)
 	return err == nil || errors.Is(err, syscall.EPERM)
-}
-
-// cmdlineMatches reports whether pid's argv names both binary and home, so a
-// recycled pid running something else is never adopted.
-func cmdlineMatches(pid int, binary, home string) bool {
-	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
-	if err != nil {
-		return false
-	}
-	argv := bytes.Split(bytes.TrimRight(data, "\x00"), []byte{0})
-	has := func(s string) bool { return slices.ContainsFunc(argv, func(a []byte) bool { return string(a) == s }) }
-	return has(binary) && has(home)
 }

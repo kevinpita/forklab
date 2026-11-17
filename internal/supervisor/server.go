@@ -125,7 +125,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	s.upgrade, s.completed = st.Plan, st.Completed
 	for _, spec := range specs {
-		n := &node{log: s.log, sub: s, stop: s.stop, wg: &s.wg, spec: spec}
+		n := &node{log: s.log, sub: s, stop: s.stop, wg: &s.wg, rt: runtimeOf(spec), spec: spec}
 		if h, ok := st.Halts[spec.Index]; ok {
 			n.halt, n.swap = &h, SwapHalted
 		}
