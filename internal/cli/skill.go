@@ -3,7 +3,7 @@ package cli
 import (
 	"io"
 
-	"github.com/kevinpita/forklab"
+	root "github.com/kevinpita/forklab"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +23,7 @@ func newSkillCmd(a *app) *cobra.Command {
 		Short: "Print the forklab agent skill",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return a.print(cmd, skillInfo{Name: "forklab", Content: forklab.Skill()})
+			return a.print(cmd, skillInfo{Name: "forklab", Content: root.Skill()})
 		},
 	}
 }
