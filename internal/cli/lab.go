@@ -481,10 +481,11 @@ func (d labDeleted) WriteHuman(w io.Writer) error {
 }
 
 func newLabDeleteCmd(a *app) *cobra.Command {
-	return &cobra.Command{
+	var force bool
+	cmd := &cobra.Command{
 		ValidArgsFunction: completeLabs,
 		Use:               "delete <name>",
-		Short:             "Delete a stopped lab and everything in its directory",
+		Short:             "Delete a lab and everything in its directory; a running one only with --force",
 		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			l, err := labs()
@@ -494,9 +495,19 @@ func newLabDeleteCmd(a *app) *cobra.Command {
 			if err := lab.CheckName(args[0]); err != nil {
 				return output.Usage(err)
 			}
+			if force {
+				dir, err := l.Path(args[0])
+				if err != nil {
+					return err
+				}
+				// A lab with no nodes.json has nothing to bring down.
+				if _, _, err := downLab(cmd.Context(), dir, supervisor.DefaultStopTimeout); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return fmt.Errorf("lab %s: down: %w", args[0], err)
+				}
+			}
 			dir, err := l.Delete(args[0])
 			if errors.Is(err, lab.ErrRunning) {
-				return fmt.Errorf("%w; stop it first with forklab lab down %s", err, args[0])
+				return fmt.Errorf("%w; stop it first with forklab lab down %s, or pass --force", err, args[0])
 			}
 			if err != nil {
 				return err
@@ -504,4 +515,6 @@ func newLabDeleteCmd(a *app) *cobra.Command {
 			return a.print(cmd, labDeleted{Name: args[0], Dir: dir})
 		},
 	}
+	cmd.Flags().BoolVar(&force, "force", false, "bring the lab down first if it is running")
+	return cmd
 }

@@ -285,9 +285,9 @@ var catalog = []binding{
 	bind(actLabNew, scopeLabs, "New lab", "n").foot(12, "new").onlyIf(hasLabs).
 		opens(func(m *Model) *formSpec { return labCreateSpec(m, false) }),
 	bind(actLabReset, scopeLabs, "Reset lab", "R").foot(13, "reset").onlyIf(hasLab).
-		runs(labReset, "Reset %s? Every node's chain data is wiped and the chain replays from genesis.", true),
-	bind(actLabDelete, scopeLabs, "Delete lab", "D").foot(14, "delete").onlyIf(labStopped).
-		runs(labCmd("delete"), "Delete lab %s and everything in its directory?", true),
+		runs(labForce("reset"), "Reset %s? Every node's chain data is wiped and the chain replays from genesis.", true),
+	bind(actLabDelete, scopeLabs, "Delete lab", "D").foot(14, "delete").onlyIf(hasLab).
+		runs(labForce("delete"), "Delete lab %s and everything in its directory? A running lab is stopped first.", true),
 	bind(actLabMnemonics, scopeLabs, "Show keys and mnemonics", "m").foot(15, "mnemonics").onlyIf(hasLab).
 		runs(func(m *Model) Command { return append(labCmd("show")(m), "--show-mnemonics") }, "", false).shows(),
 
@@ -359,12 +359,16 @@ var catalog = []binding{
 	bind(actClose, scopeForm, "Cancel, or keep a running command in the background", "esc", "ctrl+c").foot(20, "close"),
 }
 
-func labReset(m *Model) Command {
-	c := labCmd("reset")(m)
-	if l, _ := m.selectedLab(); l.Running {
-		c = append(c, "--force")
+// labForce runs verb on the selected lab, with --force when the lab runs,
+// so that the command brings it down first.
+func labForce(verb string) func(*Model) Command {
+	return func(m *Model) Command {
+		c := labCmd(verb)(m)
+		if l, _ := m.selectedLab(); l.Running {
+			c = append(c, "--force")
+		}
+		return c
 	}
-	return c
 }
 
 func profileCmd(verb string) func(*Model) Command {
@@ -383,11 +387,6 @@ func noLabs(m *Model) bool { return m.labPhase() == phaseNoLab }
 func hasLab(m *Model) bool {
 	_, ok := m.selectedLab()
 	return ok
-}
-
-func labStopped(m *Model) bool {
-	l, ok := m.selectedLab()
-	return ok && !l.Running
 }
 
 // labIdle is true when no lab runs and the selected one can start.

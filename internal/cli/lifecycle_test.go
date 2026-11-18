@@ -165,6 +165,44 @@ func TestOrphanedNodesBlockDeleteUntilLabDown(t *testing.T) {
 	}
 }
 
+func TestLabDeleteForceBringsTheLabDownFirst(t *testing.T) {
+	for _, tt := range []struct {
+		name           string
+		killSupervisor bool
+	}{
+		// Short names: the lab's socket path has to fit in 107 bytes.
+		{"supervised", false},
+		{"orphaned", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := newShellLab(t)
+			code, stdout, stderr := run("node", "start", "0", "--lab", "demo", "--json")
+			if code != 0 {
+				t.Fatalf("node start: code %d, %s", code, stderr)
+			}
+			node := nodesOf(t, stdout)[0].PID
+			if tt.killSupervisor {
+				sup := pidIn(supervisor.Paths{Dir: dir}.Lock())
+				if err := syscall.Kill(sup, syscall.SIGKILL); err != nil {
+					t.Fatal(err)
+				}
+				waitGone(t, sup)
+			}
+			code, _, stderr = run("lab", "delete", "demo")
+			if code != 1 || !strings.Contains(stderr, "or pass --force") || gone(node) {
+				t.Fatalf("delete of a running lab: code %d, %q; want refused with the --force hint and the node left alone", code, stderr)
+			}
+			if code, _, stderr := run("lab", "delete", "demo", "--force"); code != 0 {
+				t.Fatalf("delete --force: code %d, %s", code, stderr)
+			}
+			waitGone(t, node)
+			if _, err := os.Stat(dir); !os.IsNotExist(err) {
+				t.Errorf("lab dir after delete --force: %v", err)
+			}
+		})
+	}
+}
+
 func TestLabDeleteIgnoresAStalePidFile(t *testing.T) {
 	dir := newShellLab(t)
 	dead := exec.Command("/bin/sh", "-c", "exit 0")

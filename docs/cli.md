@@ -54,7 +54,7 @@ For tab completion and the `fl`, `flab`, and `flogs` helpers, see
 | `lab pause <name> --height <H>` | Freeze at committed application height H while keeping query RPC available |
 | `lab resume <name>` | Restore normal node arguments and verify commits resume |
 | `lab reset <name>` | Wipe chain data and replay from genesis (`--force` stops the lab first) |
-| `lab delete <name>` | Delete a stopped lab |
+| `lab delete <name>` | Delete a stopped lab (`--force` stops the lab first) |
 | `node list` | Show each node's state, pid, uptime, and binary; a pid marked `(cosmovisor)` is cosmovisor running the binary |
 | `node start <i\|all>` | Start a node or all nodes |
 | `node stop <i\|all>` | Stop with SIGTERM |
