@@ -165,6 +165,11 @@ func TestFormArgv(t *testing.T) {
 			"forklab lab create cv --profile lsimd --version 0.53.8 --validators 2 --cosmovisor-download --cosmovisor-bin /x/cosmovisor --json",
 		},
 		{
+			"lab create docker", labForm,
+			map[string]string{"name": "dk", "profile": "lsimd", "version": "0.53.8", "upgrades": "cosmovisor", "runtime": "docker", "image": "my/image:1"},
+			"forklab lab create dk --profile lsimd --version 0.53.8 --validators 2 --cosmovisor --runtime docker --image my/image:1 --json",
+		},
+		{
 			"first-lab wizard", wizard,
 			map[string]string{"profile": "lsimd", "version": "0.53.8"},
 			"forklab lab create devnet --profile lsimd --version 0.53.8 --validators 2 --json",

@@ -93,6 +93,10 @@ type labUp struct {
 func (u labUp) WriteHuman(w io.Writer) error {
 	_, _ = fmt.Fprintf(w, "lab %s is up\n", u.Name)
 	for _, n := range u.Nodes {
+		if n.Container != "" {
+			_, _ = fmt.Fprintf(w, "%s container %s at height %d\n", n.Name, n.Container, n.Height)
+			continue
+		}
 		_, _ = fmt.Fprintf(w, "%s pid %d at height %d\n", n.Name, n.PID, n.Height)
 	}
 	return nil

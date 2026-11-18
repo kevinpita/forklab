@@ -53,7 +53,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	root := newRootCmd(a)
-	root.SetContext(ctx)
+	root.SetContext(context.WithValue(ctx, noticeKey{}, stderr))
 	return execute(a, root, args, stdout, stderr)
 }
 

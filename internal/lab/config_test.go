@@ -1,11 +1,15 @@
 package lab
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kevinpita/forklab/internal/profile"
 )
 
 // homeFrom copies a chain's init-generated config files into a new home.
@@ -116,7 +120,7 @@ func TestConfigureFailsOnAMissingRequiredKey(t *testing.T) {
 
 func TestTOMLSetLeavesDisabledListenersAlone(t *testing.T) {
 	doc := parseTOML([]byte("[rpc]\npprof_laddr = \"\"\n"))
-	applied, err := doc.setPort("rpc.pprof_laddr", 6160)
+	applied, err := doc.setPort("rpc.pprof_laddr", "", 6160)
 	if err != nil || applied {
 		t.Fatalf("applied=%v err=%v, want a disabled listener left alone", applied, err)
 	}
@@ -168,6 +172,109 @@ func TestConfigurePointsClientTOMLAtTheNodesOwnRPCWhenAsked(t *testing.T) {
 		}
 		if _, got, _ := readTOML(t, home, "client.toml").find("node"); got != c.want {
 			t.Errorf("ownClient %t: node = %s, want %s", c.own, got, c.want)
+		}
+	}
+}
+
+// A node in a container listens on every interface, so the ports the
+// engine publishes reach it.
+func TestConfigureReplacesTheListenHostWhenAsked(t *testing.T) {
+	home := homeFrom(t, "simd")
+	nodes, err := allocatePorts(1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := configure(home, nodeSettings{ports: nodes[0], blockTime: time.Second, feeDenom: "stake", host: "0.0.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, app := readTOML(t, home, "config.toml"), readTOML(t, home, "app.toml")
+	for _, w := range []struct {
+		doc       *tomlDoc
+		key, want string
+	}{
+		{cfg, "rpc.laddr", `"tcp://0.0.0.0:26657"`},
+		{app, "api.address", `"tcp://0.0.0.0:1317"`},
+		{app, "grpc.address", `"0.0.0.0:9090"`},
+	} {
+		if _, got, _ := w.doc.find(w.key); got != w.want {
+			t.Errorf("%s = %s, want %s", w.key, got, w.want)
+		}
+	}
+}
+
+// A docker lab's nodes dial each other at their fixed addresses. A
+// container name would be looked up once per start, and a node whose
+// container was recreated would be lost to its peers.
+func TestDockerLabPeersAreTheNodesFixedAddresses(t *testing.T) {
+	partial := t.TempDir()
+	nodes := []Node{{Index: 0, Name: "node0", NodeID: "aa"}, {Index: 1, Name: "node1", NodeID: "bb"}, {Index: 2, Name: "node2", NodeID: "cc"}}
+	for _, n := range nodes {
+		home := filepath.Join(partial, n.Name)
+		if err := os.Rename(homeFrom(t, "simd"), home); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, "config", "client.toml"), []byte("chain-id = \"\"\nkeyring-backend = \"os\"\nnode = \"tcp://localhost:26657\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// A profile may name the same key in two config files.
+		for _, file := range []string{"app.toml", "config.toml"} {
+			f, err := os.OpenFile(filepath.Join(home, "config", file), os.O_APPEND|os.O_WRONLY, 0o644)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.WriteString("\n[extra]\naddress = \"0.0.0.0:1\"\n"); err != nil {
+				t.Fatal(err)
+			}
+			_ = f.Close()
+		}
+	}
+	ports, err := allocatePorts(len(nodes), map[string]map[string]int{"app.toml": {"extra.address": 7000}, "config.toml": {"extra.address": 8000}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := builder{
+		in: CreateInput{Name: "dk", ChainID: "c-1"}, p: profile.Profile{BlockTime: time.Second, FeeDenom: "stake"},
+		dir: partial, partial: partial, ports: ports, docker: true, subnet: "10.89.3.0/24",
+		cli: chainCLI{ctx: t.Context(), bin: "/bin/true", log: io.Discard},
+	}
+	if err := b.configure(nodes); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{
+		`"bb@10.89.3.11:26656,cc@10.89.3.12:26656"`,
+		`"aa@10.89.3.10:26656,cc@10.89.3.12:26656"`,
+		`"aa@10.89.3.10:26656,bb@10.89.3.11:26656"`,
+	} {
+		if _, got, _ := readTOML(t, b.home(i), "config.toml").find("p2p.persistent_peers"); got != want {
+			t.Errorf("node%d: persistent_peers = %s, want %s", i, got, want)
+		}
+	}
+	if want := []string{"10.89.3.10", "10.89.3.11", "10.89.3.12"}; !slices.Equal(b.ips, want) {
+		t.Errorf("node addresses = %v, want %v", b.ips, want)
+	}
+	// The lab records the host port of each listen address, by file and key.
+	for _, want := range []Port{{File: "app.toml", Key: "extra.address", Port: 7100}, {File: "config.toml", Key: "extra.address", Port: 8100}} {
+		if !slices.ContainsFunc(nodes[1].Ports, func(p Port) bool { return p.File == want.File && p.Key == want.Key && p.Port == want.Port }) {
+			t.Errorf("node1 ports = %+v, want %+v among them", nodes[1].Ports, want)
+		}
+	}
+	// Each node's host port is published to the port the node listens on
+	// in its container, which is node0's: with the host port on both sides
+	// every node but node0 would be out of reach from the host.
+	specs := b.nodeSpecs(nodes)
+	for i, want := range [][]string{
+		{"127.0.0.1:26657:26657", "127.0.0.1:26656:26656", "127.0.0.1:7000:7000", "127.0.0.1:8000:8000"},
+		{"127.0.0.1:26757:26657", "127.0.0.1:26756:26656", "127.0.0.1:7100:7000", "127.0.0.1:8100:8000"},
+		{"127.0.0.1:26857:26657", "127.0.0.1:26856:26656", "127.0.0.1:7200:7000", "127.0.0.1:8200:8000"},
+	} {
+		c := specs[i].Container
+		if c == nil || c.IP != b.ips[i] || c.Subnet != "10.89.3.0/24" || len(c.Publish) != len(nodes[i].Ports) {
+			t.Fatalf("node%d container = %+v, want its address and one mapping per port of %+v", i, c, nodes[i].Ports)
+		}
+		for _, w := range want {
+			if !slices.Contains(c.Publish, w) {
+				t.Errorf("node%d publishes %q, want %q among them", i, c.Publish, w)
+			}
 		}
 	}
 }

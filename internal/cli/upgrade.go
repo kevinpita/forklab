@@ -217,9 +217,20 @@ func schedule(cmd *cobra.Command, a *app, e labEnv, version string, f scheduleFl
 			return err
 		}
 	}
-	info, err := upgradeInfo(bin, download, runtime.GOOS)
+	// Cosmovisor looks the link up by the platform it runs on, and a
+	// container is linux whatever the host is.
+	goos := runtime.GOOS
+	if e.cfg.Runtime == lab.RuntimeDocker {
+		goos = "linux"
+	}
+	info, err := upgradeInfo(bin, download, goos)
 	if err != nil {
 		return err
+	}
+	if e.cfg.Runtime == lab.RuntimeDocker {
+		if err := (supervisor.Container{Image: e.cfg.Image}).Preflight(ctx, bin.Path); err != nil {
+			return err
+		}
 	}
 	f.reporter.Emit("upgrade.prepare", "Checking upgrade window", taskprogress.Started)
 	c, rpc, err := e.liveCLI(ctx)

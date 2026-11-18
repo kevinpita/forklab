@@ -45,6 +45,10 @@ type CreateInput struct {
 	Cosmovisor func(context.Context) (string, error)
 	// CosmovisorDownload makes cosmovisor fetch upgrade binaries itself.
 	CosmovisorDownload bool
+	// Runtime is RuntimeDocker to run the nodes in containers; Image then
+	// names the image, or is empty for the one forklab builds.
+	Runtime string
+	Image   string
 }
 
 // ForkInput is the chain state a fork lab takes over.
@@ -112,6 +116,22 @@ func (l Labs) Create(ctx context.Context, in CreateInput) (Config, string, error
 		}
 		cosmovisor = &Cosmovisor{Path: path, Download: in.CosmovisorDownload}
 	}
+	if in.Runtime == RuntimeDocker {
+		in.Reporter.Emit("lab.image", "Preparing the node image", progress.Started)
+		// The lab records in.Image as given: an empty one means the image
+		// that the forklab starting a node builds, whichever that is then.
+		image := supervisor.Container{Image: in.Image}
+		if err := image.Preflight(ctx, bin); err != nil {
+			return Config{}, "", fmt.Errorf("lab %s: %w", in.Name, err)
+		}
+		if cosmovisor != nil {
+			// forklab's own build is static; one the user names may not be.
+			if err := image.Preflight(ctx, cosmovisor.Path, "help"); err != nil {
+				return Config{}, "", fmt.Errorf("lab %s: %w", in.Name, err)
+			}
+		}
+		in.Reporter.Emit("lab.image", "Node image ready", progress.Completed)
+	}
 	var exported *exportedState
 	if in.Fork != nil {
 		if exported, err = loadExport(ctx, bin, *in.Fork, in.Reporter); err != nil {
@@ -141,7 +161,22 @@ func (l Labs) Create(ctx context.Context, in CreateInput) (Config, string, error
 	}
 	defer func() { _ = logFile.Close() }()
 
-	b := builder{in: in, p: in.Profile.Profile, dir: dir, partial: partial, ports: ports, exported: exported, cosmovisor: cosmovisor, cli: chainCLI{ctx: ctx, bin: bin, log: logFile}}
+	// A docker lab gets its network now, and keeps it until it is deleted:
+	// the nodes' addresses, which their peers are configured with, are in
+	// the network's subnet.
+	subnet, published := "", false
+	if in.Runtime == RuntimeDocker {
+		network := supervisor.NetworkName(in.Name)
+		if subnet, err = supervisor.LabNetwork(ctx, network, dir); err != nil {
+			return Config{}, "", fmt.Errorf("lab %s: %w", in.Name, err)
+		}
+		defer func() {
+			if !published {
+				_ = supervisor.RemoveNetwork(context.WithoutCancel(ctx), network, dir)
+			}
+		}()
+	}
+	b := builder{in: in, p: in.Profile.Profile, dir: dir, partial: partial, ports: ports, exported: exported, cosmovisor: cosmovisor, docker: in.Runtime == RuntimeDocker, subnet: subnet, cli: chainCLI{ctx: ctx, bin: bin, log: logFile}}
 	c, err := b.build()
 	if err != nil {
 		return Config{}, "", fmt.Errorf("lab %s: %w (log: %s)", in.Name, err, logPath)
@@ -150,6 +185,7 @@ func (l Labs) Create(ctx context.Context, in CreateInput) (Config, string, error
 	if err := os.Rename(partial, dir); err != nil {
 		return Config{}, "", err
 	}
+	published = true
 	in.Reporter.Emit("lab.publish", "Lab created", progress.Completed)
 	return c, dir, nil
 }
@@ -194,7 +230,13 @@ type builder struct {
 	// exported is the parsed chain state in fork mode.
 	exported   *exportedState
 	cosmovisor *Cosmovisor
-	cli        chainCLI
+	// docker says that the nodes run in containers, and subnet is then the
+	// address range of the lab's network.
+	docker bool
+	subnet string
+	// ips are the nodes' addresses in subnet, set by configure.
+	ips []string
+	cli chainCLI
 }
 
 // exportedState is the exported genesis a fork lab takes over.
@@ -239,6 +281,9 @@ func (b *builder) build() (Config, error) {
 		CreatedAt:  time.Now().UTC().Truncate(time.Second),
 		Profile:    b.in.Profile.Snapshot(),
 		Cosmovisor: b.cosmovisor,
+	}
+	if b.docker {
+		c.Runtime, c.Image = RuntimeDocker, b.in.Image
 	}
 	if b.exported != nil {
 		c.Mode = ModeFork
@@ -501,27 +546,75 @@ func genesisCoins(bond, fee string) string {
 	return bondBalance.String() + bond + "," + feeBalance.String() + fee
 }
 
+// configure writes every node's ports and peers. A host lab's nodes share
+// the host, so each listens on its own ports and dials the others on
+// 127.0.0.1. A docker lab's nodes each have their own address: all listen
+// on node0's ports, the defaults, on every interface, and dial each other
+// at the fixed address each has in the lab's network. Not by container
+// name: a node looks a peer's name up once per start, drops the peer when
+// its container does not exist at that moment, and keeps the address it
+// got. Node.Ports are the host's ports in both cases; a docker lab
+// publishes them.
 func (b *builder) configure(nodes []Node) error {
+	if b.docker {
+		for i := range nodes {
+			ip, err := supervisor.NodeIP(b.subnet, i)
+			if err != nil {
+				return err
+			}
+			b.ips = append(b.ips, ip)
+		}
+	}
 	for i := range nodes {
-		var peers []string
+		s := nodeSettings{ports: b.ports[i], blockTime: b.p.BlockTime, feeDenom: b.p.FeeDenom, ownClient: b.cosmovisor != nil}
+		if b.docker {
+			s.ports, s.host, s.ownClient, s.clientChain = b.ports[0], "0.0.0.0", true, b.in.ChainID
+		}
 		for j, other := range nodes {
-			if j != i {
-				peers = append(peers, fmt.Sprintf("%s@127.0.0.1:%d", other.NodeID, portIn(b.ports[j], "p2p.laddr")))
+			switch {
+			case j == i:
+			case b.docker:
+				s.peers = append(s.peers, fmt.Sprintf("%s@%s:%d", other.NodeID, b.ips[j], portIn(b.ports[0], "p2p.laddr")))
+			default:
+				s.peers = append(s.peers, fmt.Sprintf("%s@127.0.0.1:%d", other.NodeID, portIn(b.ports[j], "p2p.laddr")))
 			}
 		}
-		ports, err := configure(b.home(i), nodeSettings{ports: b.ports[i], peers: peers, blockTime: b.p.BlockTime, feeDenom: b.p.FeeDenom, ownClient: b.cosmovisor != nil})
+		ports, err := configure(b.home(i), s)
 		if err != nil {
 			return fmt.Errorf("configure %s: %w", nodes[i].Name, err)
+		}
+		if b.docker {
+			// With client.toml's test backend, the chain binary run by hand
+			// in the container then signs with the lab keys by default.
+			if err := os.Symlink(filepath.Join("..", "keys", "keyring-test"), filepath.Join(b.home(i), "keyring-test")); err != nil {
+				return fmt.Errorf("configure %s: %w", nodes[i].Name, err)
+			}
+			// The node was configured with node0's ports; the lab records
+			// the host port each one is published at.
+			for k, p := range ports {
+				ports[k].Port = portAt(b.ports[i], p)
+			}
 		}
 		nodes[i].Ports = ports
 	}
 	return nil
 }
 
+// portAt returns the port that ports has for the listen address p names.
+// The file counts too: two config files may use the same key.
+func portAt(ports []Port, p Port) int {
+	for _, q := range ports {
+		if q.File == p.File && q.Key == p.Key {
+			return q.Port
+		}
+	}
+	return 0
+}
+
 func (b *builder) nodeSpecs(nodes []Node) []supervisor.NodeSpec {
 	noColor := b.cli.helpHas([]string{"start"}, "--log_no_color")
 	var specs []supervisor.NodeSpec
-	for _, n := range nodes {
+	for i, n := range nodes {
 		home := NodeHome(b.dir, n)
 		args := []string{"start", "--home", home}
 		if noColor {
@@ -534,6 +627,13 @@ func (b *builder) nodeSpecs(nodes []Node) []supervisor.NodeSpec {
 		}
 		if cv := b.cosmovisor; cv != nil {
 			spec.Cosmovisor = &supervisor.Cosmovisor{Path: cv.Path, Name: b.p.BinaryName, Download: cv.Download}
+		}
+		if b.docker {
+			c := &supervisor.Container{Name: supervisor.ContainerName(b.in.Name, n.Name), Image: b.in.Image, Network: supervisor.NetworkName(b.in.Name), Subnet: b.subnet, IP: b.ips[i]}
+			for _, p := range n.Ports {
+				c.Publish = append(c.Publish, fmt.Sprintf("127.0.0.1:%d:%d", p.Port, portAt(b.ports[0], p)))
+			}
+			spec.Container = c
 		}
 		specs = append(specs, spec)
 	}

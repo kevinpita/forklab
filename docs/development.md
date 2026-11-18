@@ -53,6 +53,7 @@ chain binaries or homes:
 | `FORKLAB_EXRPD` | An `exrpd` v11.1.1 binary (cli and genesis tests) |
 | `FORKLAB_EXRPD_OLD`, `FORKLAB_EXRPD_NEW` | `exrpd` v11.1.1 and v11.2.0 binaries for the upgrade tests |
 | `FORKLAB_COSMOVISOR` | The `cosmovisor` forklab pins (see below), with the two above, for the cosmovisor upgrade tests |
+| `FORKLAB_E2E_DOCKER` | Set to `1`, with `FORKLAB_EXRPD_OLD` and `FORKLAB_EXRPD_NEW`, to run the docker runtime tests against the engine the `docker` CLI reaches; `FORKLAB_COSMOVISOR` adds the cosmovisor case |
 | `FORKLAB_SIMD_MAINNET`, `FORKLAB_EXRPD_MAINNET` | A stopped node home (`data/` and `config/genesis.json`) that the fork tests pack into a snapshot |
 | `FORKLAB_RPC` | The CometBFT RPC of a live node, for `go test -tags e2e ./internal/chain` |
 
@@ -75,6 +76,14 @@ git fetch --depth 1 https://github.com/cosmos/cosmos-sdk 58bf3aad378754cecfcbc59
 git checkout FETCH_HEAD
 (cd tools/cosmovisor && CGO_ENABLED=0 go build -o /tmp/cosmovisor ./cmd/cosmovisor)
 export FORKLAB_COSMOVISOR=/tmp/cosmovisor
+```
+
+The docker runtime tests publish the lab ports on the host, so they cannot
+run in a private network namespace. Run them alone, with no lab up and the
+lab ports free:
+
+```sh
+FORKLAB_E2E_DOCKER=1 go test -tags e2e -run TestE2EDockerExrpd ./internal/cli
 ```
 
 ## Screenshots

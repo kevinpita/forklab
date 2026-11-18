@@ -29,6 +29,9 @@ type NodeStatus struct {
 	// cosmovisor's and Binary the chain binary its current link holds.
 	Cosmovisor bool `json:"cosmovisor,omitempty"`
 	PID        int  `json:"pid,omitempty"`
+	// Container names the container of a node on the docker runtime, which
+	// has no PID.
+	Container string `json:"container,omitempty"`
 	// Adopted is set when the process was found via its pid file rather than
 	// started by this supervisor; its exit code is then unknown.
 	Adopted       bool       `json:"adopted,omitempty"`
@@ -93,6 +96,9 @@ func (n *node) status() NodeStatus {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	st := NodeStatus{Index: n.spec.Index, Name: n.spec.Name, State: StateStopped, Binary: n.binary(), Cosmovisor: n.spec.Cosmovisor != nil, Upgrade: n.swap, SwapError: n.swapErr}
+	if c := n.spec.Container; c != nil {
+		st.Container = c.Name
+	}
 	if n.halt != nil {
 		halt := *n.halt
 		st.Halt = &halt
@@ -157,12 +163,19 @@ func (n *node) start() error {
 	pf.LogOffset = logEnd
 	if err := writePidFile(spec.PidPath, pf); err != nil {
 		_ = n.rt.signal(spec, pf, syscall.SIGKILL, false)
-		wait()
+		gaveUp := make(chan struct{})
+		timer := time.AfterFunc(killTimeout, func() { close(gaveUp) })
+		wait(gaveUp)
+		timer.Stop()
 		return fmt.Errorf("start node %d: %w", spec.Index, err)
 	}
 	p := n.attach(pf, false)
-	n.log.Printf("node %d: started pid %d with %s", spec.Index, pf.PID, pf.Binary)
-	go func() { n.exited(p, wait()) }()
+	n.log.Printf("node %d: started %s with %s", spec.Index, pf, pf.Binary)
+	n.wg.Go(func() {
+		if e, ok := wait(n.stop); ok {
+			n.exited(p, e)
+		}
+	})
 	return nil
 }
 
@@ -170,7 +183,9 @@ func (n *node) start() error {
 // longer finds alive (for a host process: the pid is gone, or its cmdline
 // does not name the recorded binary and this node's home, a recycled pid)
 // means the node exited while no supervisor watched: its remaining log
-// lines are delivered, then it is marked exited.
+// lines are delivered, then it is marked exited. One the runtime cannot
+// tell about is kept as running, with its pid file, and watched: the watch
+// ends it once the runtime confirms that it is gone.
 func (n *node) adopt() error {
 	spec := n.currentSpec()
 	pf, err := readPidFile(spec.PidPath)
@@ -182,12 +197,16 @@ func (n *node) adopt() error {
 		return err
 	}
 	p := n.attach(pf, true)
-	if !n.rt.alive(spec, pf) {
-		n.log.Printf("node %d: pid %d from %s is gone", spec.Index, pf.PID, spec.PidPath)
+	switch running, err := n.rt.alive(spec, pf); {
+	case err != nil:
+		n.log.Printf("node %d: cannot tell whether %s runs, keeping it: %v", spec.Index, pf, err)
+	case !running:
+		n.log.Printf("node %d: %s from %s is gone", spec.Index, pf, spec.PidPath)
 		n.exited(p, exitInfo{at: time.Now()})
 		return nil
+	default:
+		n.log.Printf("node %d: adopted %s running %s", spec.Index, pf, pf.Binary)
 	}
-	n.log.Printf("node %d: adopted pid %d running %s", spec.Index, pf.PID, pf.Binary)
 	n.wg.Go(func() {
 		if n.rt.watch(spec, pf, n.stop) {
 			n.exited(p, exitInfo{at: time.Now()})
@@ -241,11 +260,11 @@ func (n *node) exited(p *process, e exitInfo) {
 	close(p.gone)
 	switch {
 	case e.signal != "":
-		n.log.Printf("node %d: pid %d ended by signal %s", index, p.pf.PID, e.signal)
+		n.log.Printf("node %d: %s ended by signal %s", index, p.pf, e.signal)
 	case e.code != nil:
-		n.log.Printf("node %d: pid %d exited with code %d", index, p.pf.PID, *e.code)
+		n.log.Printf("node %d: %s exited with code %d", index, p.pf, *e.code)
 	default:
-		n.log.Printf("node %d: pid %d exited while unwatched", index, p.pf.PID)
+		n.log.Printf("node %d: %s exited while unwatched", index, p.pf)
 	}
 }
 
@@ -256,9 +275,11 @@ func (n *node) signal(sig syscall.Signal, timeout time.Duration) error {
 	if p == nil {
 		return nil
 	}
-	if p.adopted && !n.rt.alive(n.currentSpec(), p.pf) {
-		<-p.gone
-		return nil
+	if p.adopted {
+		if running, err := n.rt.alive(n.currentSpec(), p.pf); err == nil && !running {
+			<-p.gone
+			return nil
+		}
 	}
 	if err := n.rt.signal(n.currentSpec(), p.pf, sig, p.adopted); err != nil {
 		return fmt.Errorf("signal node %d: %w", n.spec.Index, err)
@@ -267,7 +288,7 @@ func (n *node) signal(sig syscall.Signal, timeout time.Duration) error {
 	case <-p.gone:
 		return nil
 	case <-time.After(timeout):
-		return fmt.Errorf("node %d (pid %d) still running %s after %s", n.spec.Index, p.pf.PID, timeout, sig)
+		return fmt.Errorf("node %d (%s) still running %s after %s", n.spec.Index, p.pf, timeout, sig)
 	}
 }
 

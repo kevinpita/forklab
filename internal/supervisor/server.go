@@ -237,6 +237,10 @@ func (s *supervisor) handle(req Request) (resp Response, quit bool) {
 			s.log.Printf("down: %v; killing", err)
 			err = s.each(Request{Op: OpKill, Nodes: All})
 		}
+		if downErr := removeContainers(s.specs()); downErr != nil {
+			s.log.Printf("down: %v", downErr)
+			err = errors.Join(err, downErr)
+		}
 		quit = true
 	case OpExit:
 		s.closing.Store(true)
@@ -474,9 +478,13 @@ func deref(code *int) any {
 func (s *supervisor) saveNodes() error {
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
+	return SaveNodes(s.paths.Dir, s.specs())
+}
+
+func (s *supervisor) specs() []NodeSpec {
 	specs := make([]NodeSpec, len(s.nodes))
 	for i, n := range s.nodes {
 		specs[i] = n.currentSpec()
 	}
-	return SaveNodes(s.paths.Dir, specs)
+	return specs
 }

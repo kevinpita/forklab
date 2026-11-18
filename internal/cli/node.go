@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -45,7 +46,7 @@ func (l nodeList) WriteHuman(w io.Writer) error {
 		pid, uptime, exit := "-", "-", "-"
 		switch n.State {
 		case supervisor.StateRunning:
-			pid = strconv.Itoa(n.PID)
+			pid = cmp.Or(n.Container, strconv.Itoa(n.PID))
 			uptime = (time.Duration(n.UptimeSeconds) * time.Second).String()
 			if n.Adopted {
 				pid += " (adopted)"

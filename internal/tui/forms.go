@@ -424,6 +424,12 @@ func labCreateSpec(m *Model, wizard bool) *formSpec {
 				hint:    "Cosmovisor runs each node and switches binaries at an upgrade, as on a real validator.",
 			},
 			{key: "cosmovisor-bin", label: "Cosmovisor", kind: fieldText, optional: true, placeholder: "pinned version, built on first use", show: func(v values) bool { return v["upgrades"] != "" && v["upgrades"] != "forklab" }, hint: "path of a cosmovisor binary to use instead"},
+			{
+				key: "runtime", label: "Runtime", kind: fieldSelect, def: "host",
+				options: []option{{"host", "host processes"}, {"docker", "one container per node"}},
+				hint:    "Docker gives every validator its own container to log in to; it needs the docker CLI and a running engine.",
+			},
+			{key: "image", label: "Image", kind: fieldText, optional: true, placeholder: "built by forklab", show: has("runtime", "docker"), hint: "container image to use instead, for a binary that needs extra libraries"},
 		}...)
 	}
 
@@ -467,6 +473,12 @@ func labCreateSpec(m *Model, wizard bool) *formSpec {
 			}
 			if v["cosmovisor-bin"] != "" && (v["upgrades"] == "cosmovisor" || v["upgrades"] == "download") {
 				c = append(c, "--cosmovisor-bin", v["cosmovisor-bin"])
+			}
+			if v["runtime"] == "docker" {
+				c = append(c, "--runtime", "docker")
+				if v["image"] != "" {
+					c = append(c, "--image", v["image"])
+				}
 			}
 			return c
 		},

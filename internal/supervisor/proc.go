@@ -13,14 +13,25 @@ import (
 // pidFile is what a node's pid file holds. Binary is the chain binary the
 // node was started with, which a restart --binary may have changed from
 // nodes.json. Exec is the program the pid runs when that is not Binary: the
-// cosmovisor that wraps it. LogOffset is where the log subscriber resumes:
-// the end of the log when the node started, advanced as lines are delivered.
+// cosmovisor that wraps it. Container is the id of the container a node of
+// the docker runtime runs in; it then has no PID. LogOffset is where the
+// log subscriber resumes: the end of the log when the node started,
+// advanced as lines are delivered.
 type pidFile struct {
 	PID       int       `json:"pid"`
 	Binary    string    `json:"binary"`
 	Exec      string    `json:"exec,omitempty"`
+	Container string    `json:"container,omitempty"`
 	StartedAt time.Time `json:"started_at"`
 	LogOffset int64     `json:"log_offset"`
+}
+
+// String names the process for logs and errors.
+func (p pidFile) String() string {
+	if p.Container != "" {
+		return fmt.Sprintf("container %.12s", p.Container)
+	}
+	return fmt.Sprintf("pid %d", p.PID)
 }
 
 func writePidFile(path string, p pidFile) error {
@@ -51,10 +62,16 @@ func readPidFile(path string) (pidFile, error) {
 	return p, nil
 }
 
+// ErrLiveness means a node's runtime could not tell whether the node runs,
+// for example because the docker engine does not answer. Such a lab may be
+// running and must not be treated as stopped.
+var ErrLiveness = errors.New("cannot tell whether the node runs")
+
 // LiveNodes returns the indexes of labDir's nodes whose pid file names a live
 // process running the recorded binary with the node's home, whether or not a
 // supervisor watches it. A node without a pid file is asked about too: a
-// runtime may know of a process that no file records.
+// runtime may know of a process that no file records. It fails with
+// ErrLiveness when a runtime cannot tell.
 func LiveNodes(labDir string) ([]int, error) {
 	specs, err := LoadNodes(labDir)
 	if err != nil {
@@ -66,7 +83,11 @@ func LiveNodes(labDir string) ([]int, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, err
 		}
-		if runtimeOf(s).alive(s, pf) {
+		running, err := runtimeOf(s).alive(s, pf)
+		if err != nil {
+			return nil, fmt.Errorf("%s (%s): %w: %w", s.Name, pf, ErrLiveness, err)
+		}
+		if running {
 			live = append(live, s.Index)
 		}
 	}

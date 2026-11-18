@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,13 @@ type nodeSettings struct {
 	// default port, which is node0's. Cosmovisor needs it: it only acts on
 	// an upgrade once `<bin> status --home <home>` reports the plan height.
 	ownClient bool
+	// host, when set, replaces the host of every listen address: a node in
+	// a container listens on all interfaces so its ports can be published.
+	host string
+	// clientChain, with ownClient, also puts the chain ID and the test
+	// keyring backend in client.toml, for someone who runs the chain binary
+	// by hand in a node's container.
+	clientChain string
 }
 
 // configure edits config.toml and app.toml in home and returns the ports it
@@ -51,7 +59,7 @@ func configure(home string, s nodeSettings) ([]Port, error) {
 		if _, _, found := doc.find(p.Key); !found && p.optional {
 			continue
 		}
-		applied, err := doc.setPort(p.Key, p.Port)
+		applied, err := doc.setPort(p.Key, s.host, p.Port)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", p.File, err)
 		}
@@ -74,6 +82,11 @@ func configure(home string, s nodeSettings) ([]Port, error) {
 	if client, ok := docs["client.toml"]; ok {
 		if err := client.setString("node", fmt.Sprintf("tcp://localhost:%d", portIn(s.ports, "rpc.laddr"))); err != nil {
 			return nil, fmt.Errorf("client.toml: %w", err)
+		}
+		if s.clientChain != "" {
+			if err := errors.Join(client.setString("chain-id", s.clientChain), client.setString("keyring-backend", "test")); err != nil {
+				return nil, fmt.Errorf("client.toml: %w", err)
+			}
 		}
 	}
 	for _, e := range edits {

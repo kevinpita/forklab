@@ -64,9 +64,10 @@ func (d *tomlDoc) setString(key, value string) error {
 	return d.set(key, strconv.Quote(value))
 }
 
-// setPort keeps the host and scheme of key's address and replaces its port.
-// An empty address means the listener is disabled and stays that way.
-func (d *tomlDoc) setPort(key string, port int) (bool, error) {
+// setPort keeps the scheme of key's address and replaces its port, and its
+// host too when host is not empty. An empty address means the listener is
+// disabled and stays that way.
+func (d *tomlDoc) setPort(key, host string, port int) (bool, error) {
 	_, raw, ok := d.find(key)
 	if !ok {
 		return false, fmt.Errorf("key %s not found", key)
@@ -82,9 +83,12 @@ func (d *tomlDoc) setPort(key string, port int) (bool, error) {
 	if i := strings.Index(addr, "://"); i >= 0 {
 		scheme, hostPort = addr[:i+3], addr[i+3:]
 	}
-	host, _, err := net.SplitHostPort(hostPort)
+	kept, _, err := net.SplitHostPort(hostPort)
 	if err != nil {
 		return false, fmt.Errorf("key %s: %w", key, err)
+	}
+	if host == "" {
+		host = kept
 	}
 	return true, d.setString(key, scheme+net.JoinHostPort(host, strconv.Itoa(port)))
 }

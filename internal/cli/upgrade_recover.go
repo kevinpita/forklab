@@ -161,6 +161,10 @@ func recoverUpgrade(cmd *cobra.Command, a *app, e labEnv, previous bool, version
 	next.AutoSwap = false
 	next.Recovery = &supervisor.Recovery{ID: rand.Text(), Mode: mode, Targets: targets}
 
+	// The recovery restarts every validator.
+	if err := prepareImage(ctx, e.dir, noticeWriter(ctx)); err != nil {
+		return err
+	}
 	sup, err := supervisor.Dial(e.dir)
 	if err != nil {
 		report.Emit("recovery.supervisor", "Starting supervisor with automatic swaps disabled", taskprogress.Started)

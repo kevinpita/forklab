@@ -77,7 +77,8 @@ forklab builds cosmovisor from the cosmos-sdk repository the first time a lab
 needs it and caches it, which needs `git` and Go 1.27.3 or later. The mode is
 fixed when the lab is created. `lab show` names it, and `node list` marks
 each pid `(cosmovisor)`: the pid is cosmovisor's, and the chain binary is its
-child.
+child. On the [docker runtime](docker.md) a node has no pid: `node list`
+shows its container, and cosmovisor runs inside it.
 
 > [!IMPORTANT]
 > The cosmovisor forklab builds is not a release. It is
@@ -129,7 +130,8 @@ differences:
 - **Scheduled upgrade.** `upgrade schedule` puts the new binary in
   `cosmovisor/upgrades/<plan>/bin/` on every node as soon as the plan is
   registered. At the plan height the node halts, cosmovisor moves `current`
-  to that directory, and it starts the new binary. The pid does not change.
+  to that directory, and it starts the new binary. The pid does not change,
+  nor does the container of a docker lab.
   `upgrade status` shows the node as `swapped` once the link has moved.
 - **Download.** Create the lab with `--cosmovisor-download` and forklab
   places nothing. The proposal's plan `info` carries a link,

@@ -33,6 +33,9 @@ Cosmos SDK example chain) and `xrplevm` (XRPL EVM, binary `exrpd`).
 - **Upgrade rehearsal with auto swap.** `upgrade schedule` submits and votes the
   proposal, then restarts every halted node on the new binary at the plan
   height.
+- **Cosmovisor and containers when you want them.** Run the nodes under
+  cosmovisor so it swaps the binary as on a real validator, or give every
+  validator its own Docker container and log in with `docker exec`.
 - **Consensus you can see.** Height, round, step, proposer, and each
   validator's prevote and precommit, live or as JSON.
 - **Agent-first CLI.** Every command takes `--json`, never prompts, and exits
@@ -138,4 +141,5 @@ supervisor restarted them on 11.2.0.
 | [Profiles](docs/profiles.md) | Profile fields, genesis patches, and binary sources |
 | [Fork mode](docs/fork-mode.md) | Labs forked from mainnet snapshots |
 | [Upgrades](docs/upgrades.md) | Scheduling, automatic and manual swaps, and cancelling |
+| [Docker runtime](docs/docker.md) | One container per validator, `docker exec`, the image, ports, and limits |
 | [Development](docs/development.md) | Toolchain, recipes, end-to-end tests, and screenshots |

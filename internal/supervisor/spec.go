@@ -16,6 +16,8 @@ import (
 // chain's start subcommand and --home. Home must appear in Args: adoption
 // matches a live pid on it. Cosmovisor, when set, runs the node under
 // cosmovisor; Binary is then the chain binary its current link holds.
+// Container, when set, runs the node in a container instead of as a host
+// process.
 type NodeSpec struct {
 	Index      int         `json:"index"`
 	Name       string      `json:"name"`
@@ -25,6 +27,7 @@ type NodeSpec struct {
 	LogPath    string      `json:"log_path"`
 	PidPath    string      `json:"pid_path"`
 	Cosmovisor *Cosmovisor `json:"cosmovisor,omitempty"`
+	Container  *Container  `json:"container,omitempty"`
 }
 
 // Paths locates the supervisor's files in a lab directory.
@@ -56,6 +59,8 @@ func LoadNodes(labDir string) ([]NodeSpec, error) {
 			return nil, fmt.Errorf("%s: node %d args do not mention its home %s", path, i, s.Home)
 		case s.Cosmovisor != nil && (s.Cosmovisor.Path == "" || s.Cosmovisor.Name == ""):
 			return nil, fmt.Errorf("%s: node %d cosmovisor needs path and name", path, i)
+		case s.Container != nil && (s.Container.Name == "" || s.Container.Network == "" || s.Container.Subnet == "" || s.Container.IP == ""):
+			return nil, fmt.Errorf("%s: node %d container needs name, network, subnet, and ip", path, i)
 		}
 	}
 	if len(specs) == 0 {

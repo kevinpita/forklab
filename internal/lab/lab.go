@@ -10,6 +10,7 @@ package lab
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -49,9 +50,19 @@ type Config struct {
 	Profile    profile.Document `yaml:"profile" json:"profile"`
 	Fork       *Fork            `yaml:"fork,omitempty" json:"fork,omitempty"`
 	Cosmovisor *Cosmovisor      `yaml:"cosmovisor,omitempty" json:"cosmovisor,omitempty"`
-	Nodes      []Node           `yaml:"nodes" json:"nodes"`
-	Accounts   []Account        `yaml:"accounts" json:"accounts"`
+	// Runtime is RuntimeDocker when the nodes run in containers of Image,
+	// and empty when they are host processes.
+	Runtime  string    `yaml:"runtime,omitempty" json:"runtime,omitempty"`
+	Image    string    `yaml:"image,omitempty" json:"image,omitempty"`
+	Nodes    []Node    `yaml:"nodes" json:"nodes"`
+	Accounts []Account `yaml:"accounts" json:"accounts"`
 }
+
+// The runtimes a lab's nodes can run on.
+const (
+	RuntimeHost   = "host"
+	RuntimeDocker = "docker"
+)
 
 // Cosmovisor records that the lab's nodes run under cosmovisor, which then
 // switches binaries at an upgrade.
@@ -238,7 +249,9 @@ var ErrRunning = errors.New("lab is running")
 
 // Delete removes the lab named name and returns its directory. A lab whose
 // supervisor answers, or whose nodes outlived a killed supervisor, is
-// refused. A broken lab.yaml does not stop it.
+// refused. Containers and the network a docker lab left behind go first,
+// and the lab stays when the engine does not confirm that they are gone.
+// A broken lab.yaml does not stop it.
 func (l Labs) Delete(name string) (string, error) {
 	dir, err := l.Path(name)
 	if err != nil {
@@ -253,11 +266,26 @@ func (l Labs) Delete(name string) (string, error) {
 		return "", fmt.Errorf("lab %s: %w", name, ErrRunning)
 	}
 	live, err := supervisor.LiveNodes(dir)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if errors.Is(err, fs.ErrNotExist) {
+		// Without nodes.json nothing names the lab's containers. A docker
+		// lab is then deleted only when the engine holds nothing of it.
+		if c, loadErr := Load(dir); loadErr == nil && c.Runtime == RuntimeDocker {
+			left, err := supervisor.Labelled(context.Background(), dir)
+			if err != nil {
+				return "", fmt.Errorf("lab %s: %w", name, err)
+			}
+			if len(left) > 0 {
+				return "", fmt.Errorf("lab %s: its nodes.json is missing and the engine still has %s of it; remove them with docker rm -f and docker network rm, then delete the lab", name, strings.Join(left, ", "))
+			}
+		}
+	} else if err != nil {
 		return "", fmt.Errorf("lab %s: %w", name, err)
 	}
 	if len(live) > 0 {
 		return "", fmt.Errorf("lab %s: %w (nodes %v have no supervisor)", name, ErrRunning, live)
+	}
+	if err := supervisor.Teardown(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("lab %s: %w", name, err)
 	}
 	return dir, os.RemoveAll(dir)
 }

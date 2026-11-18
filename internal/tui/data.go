@@ -15,6 +15,7 @@ type nodeInfo struct {
 	State         string     `json:"state"`
 	Binary        string     `json:"binary"`
 	PID           int        `json:"pid"`
+	Container     string     `json:"container"`
 	Adopted       bool       `json:"adopted"`
 	StartedAt     *time.Time `json:"started_at"`
 	UptimeSeconds int64      `json:"uptime_seconds"`
@@ -231,6 +232,8 @@ type labInfo struct {
 	Cosmovisor *struct {
 		Download bool `json:"download"`
 	} `json:"cosmovisor"`
+	Runtime  string    `json:"runtime"`
+	Image    string    `json:"image"`
 	Nodes    []labNode `json:"nodes"`
 	Accounts []struct {
 		Name    string `json:"name"`

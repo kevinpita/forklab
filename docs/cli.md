@@ -46,7 +46,7 @@ For tab completion and the `fl`, `flab`, and `flogs` helpers, see
 | `binary fetch <version> --profile <p>` | Download or build a binary into the cache |
 | `binary build <version> --profile <p>` | Rebuild a `git` or `src` binary |
 | `binary list` | List cached binaries |
-| `lab create <name> --profile <p> --version <v>` | Create a fresh lab, or a forked one with `--fork`; `--cosmovisor` runs the nodes under cosmovisor |
+| `lab create <name> --profile <p> --version <v>` | Create a fresh lab, or a forked one with `--fork`; `--cosmovisor` runs the nodes under cosmovisor, `--runtime docker` in containers |
 | `lab list` | List labs |
 | `lab show <name>` | Show nodes, ports, and keys (`--show-mnemonics` for mnemonics) |
 | `lab up <name>` | Start the supervisor and nodes and wait for blocks |
@@ -55,7 +55,7 @@ For tab completion and the `fl`, `flab`, and `flogs` helpers, see
 | `lab resume <name>` | Restore normal node arguments and verify commits resume |
 | `lab reset <name>` | Wipe chain data and replay from genesis (`--force` stops the lab first) |
 | `lab delete <name>` | Delete a stopped lab (`--force` stops the lab first) |
-| `node list` | Show each node's state, pid, uptime, and binary; a pid marked `(cosmovisor)` is cosmovisor running the binary |
+| `node list` | Show each node's state, pid or container, uptime, and binary; a pid marked `(cosmovisor)` is cosmovisor running the binary |
 | `node start <i\|all>` | Start a node or all nodes |
 | `node stop <i\|all>` | Stop with SIGTERM |
 | `node kill <i\|all>` | Kill with SIGKILL to simulate a crash |
@@ -85,7 +85,8 @@ For tab completion and the `fl`, `flab`, and `flogs` helpers, see
 
 Run `forklab <command> --help` for every flag. [Upgrades](upgrades.md) and
 [Fork mode](fork-mode.md) cover `upgrade`, `lab create --cosmovisor`, and
-`lab create --fork` in depth.
+`lab create --fork` in depth, and [Docker runtime](docker.md) covers
+`lab create --runtime docker`.
 [Runbooks](runbooks.md) covers YAML recipes, templates, exact-height pause,
 manual resume, and raw store inspection.
 

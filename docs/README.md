@@ -30,6 +30,9 @@ forklab runs one lab at a time. Many labs and profiles can exist on disk.
   snapshot.
 - [Upgrades](upgrades.md). Scheduling an upgrade, automatic and manual binary
   swaps, cancelling, and resetting a lab after an upgrade.
+- [Docker runtime](docker.md). Labs that run each validator in its own
+  container: logging in, names and ports, the image, file ownership, and
+  limits.
 - [Runbooks](runbooks.md). Reusable recipes, assertions, exact-height pause,
   raw stores, and execution reports.
 - [Development](development.md). The toolchain, `just` recipes, end-to-end

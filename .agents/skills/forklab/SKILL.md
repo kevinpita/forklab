@@ -20,8 +20,10 @@ description: "Use for any localnet or local chain work on Cosmos SDK chains: sta
    state and choose the operation that matches the request, including whether a
    proposal needs a draft, an export, or submission. For recovery, read
    persisted upgrade state even when RPC is unavailable. Before an upgrade or
-   a binary change, read `cosmovisor` in `lab show <lab> --json`: when it is
-   set, cosmovisor switches the binaries and forklab only delivers them.
+   a binary change, read `cosmovisor` and `runtime` in `lab show <lab>
+   --json`: with `cosmovisor` set, cosmovisor switches the binaries and
+   forklab only delivers them; with `runtime` `docker`, each node is a
+   container and has no pid.
    Finish with the target, operation, and relevant current state established.
 5. Execute the requested work using `--json` where supported. Parse the
    output as specified below, and inspect the process exit status. For

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -42,7 +43,8 @@ func newLabCmd(a *app) *cobra.Command {
 
 // running reports whether any of the lab's node processes is live, by the
 // supervisor when one answers, else by the pid files. A supervisor alone does
-// not make a lab running.
+// not make a lab running. A lab whose runtime cannot tell counts as running:
+// its nodes may be up.
 func running(dir string) bool {
 	if c, err := supervisor.Dial(dir); err == nil {
 		if nodes, err := c.Status(); err == nil {
@@ -50,7 +52,7 @@ func running(dir string) bool {
 		}
 	}
 	live, err := supervisor.LiveNodes(dir)
-	return err == nil && len(live) > 0
+	return len(live) > 0 || errors.Is(err, supervisor.ErrLiveness)
 }
 
 type labView struct {
@@ -80,6 +82,10 @@ func (v labView) WriteHuman(w io.Writer) error {
 			delivery = "cosmovisor downloads upgrade binaries"
 		}
 		_, _ = fmt.Fprintf(w, "cosmovisor %s, %s\n", cv.Path, delivery)
+	}
+	if v.Runtime == lab.RuntimeDocker && len(v.Nodes) > 0 {
+		first := supervisor.ContainerName(v.Name, v.Nodes[0].Name)
+		_, _ = fmt.Fprintf(w, "docker image %s, containers %s to %s; log in with docker exec -it %s bash\n", cmp.Or(v.Image, "built by forklab"), first, supervisor.ContainerName(v.Name, v.Nodes[len(v.Nodes)-1].Name), first)
 	}
 	_, _ = fmt.Fprintln(w)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
@@ -114,7 +120,7 @@ func (v labView) WriteHuman(w io.Writer) error {
 
 func newLabCreateCmd(a *app) *cobra.Command {
 	var in lab.CreateInput
-	var profileName, fork, progressFormat, cosmovisorPath string
+	var profileName, fork, progressFormat, cosmovisorPath, runtimeName string
 	var keepWork, cosmovisor, cosmovisorDownload bool
 	var binaries binaryFlags
 	cmd := &cobra.Command{
@@ -153,10 +159,19 @@ func newLabCreateCmd(a *app) *cobra.Command {
 				return output.Usage(err)
 			}
 			if cosmovisorPath != "" {
-				// Checked before a snapshot or a binary is fetched for a lab that cannot be made.
 				if cosmovisorPath, err = cosmovisorBin(cosmovisorPath); err != nil {
 					return err
 				}
+			}
+			switch runtimeName {
+			case lab.RuntimeHost:
+				if in.Image != "" {
+					return output.Usagef("--image needs --runtime docker")
+				}
+			case lab.RuntimeDocker:
+				in.Runtime = lab.RuntimeDocker
+			default:
+				return output.Usagef("--runtime must be host or docker")
 			}
 			root, err := paths.Home()
 			if err != nil {
@@ -227,6 +242,8 @@ func newLabCreateCmd(a *app) *cobra.Command {
 	cmd.Flags().BoolVar(&cosmovisor, "cosmovisor", false, "run every node under cosmovisor, which then switches binaries at an upgrade")
 	cmd.Flags().BoolVar(&cosmovisorDownload, "cosmovisor-download", false, "let cosmovisor download upgrade binaries from the plan info instead of forklab placing them (implies --cosmovisor)")
 	cmd.Flags().StringVar(&cosmovisorPath, "cosmovisor-bin", "", "cosmovisor binary to use instead of the version forklab pins (implies --cosmovisor)")
+	cmd.Flags().StringVar(&runtimeName, "runtime", lab.RuntimeHost, "where the nodes run: host processes, or docker for one container per node")
+	cmd.Flags().StringVar(&in.Image, "image", "", "container image for --runtime docker instead of the one forklab builds")
 	_ = cmd.MarkFlagRequired("profile")
 	_ = cmd.MarkFlagRequired("version")
 	return cmd
@@ -385,6 +402,9 @@ func (l labList) WriteHuman(w io.Writer) error {
 		state := "stopped"
 		if r.Running {
 			state = "running"
+		}
+		if r.Config != nil && r.Runtime == lab.RuntimeDocker {
+			state += ", docker"
 		}
 		if r.Config == nil {
 			_, _ = fmt.Fprintf(tw, "%s\t-\t-\t-\t-\t-\t%s, broken: %s\n", r.Name, state, r.Error)

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -218,7 +219,11 @@ func nodeMain(m *Model, w, h int) mainView {
 	head := st.Render(g) + " " + th.Title.Render(n.Name) + "  " + st.Render(state)
 	switch {
 	case n.State == "running":
-		head += "  " + kv(th, "pid", strconv.Itoa(n.PID)) + "  " + kv(th, "up", fmtDur(time.Duration(n.UptimeSeconds)*time.Second))
+		id := kv(th, "pid", strconv.Itoa(n.PID))
+		if n.Container != "" {
+			id = kv(th, "container", n.Container)
+		}
+		head += "  " + id + "  " + kv(th, "up", fmtDur(time.Duration(n.UptimeSeconds)*time.Second))
 	case n.ExitCode != nil:
 		head += "  " + kv(th, "code", strconv.Itoa(*n.ExitCode))
 	}
@@ -753,6 +758,9 @@ func labMain(m *Model, _, _ int) mainView {
 			delivery = "downloads upgrade binaries"
 		}
 		lines = append(lines, kv(th, "cosmovisor", delivery))
+	}
+	if l.Runtime == "docker" {
+		lines = append(lines, kv(th, "runtime   ", "docker, image "+cmp.Or(l.Image, "built by forklab")))
 	}
 	if l.CreatedAt != nil {
 		lines = append(lines, kv(th, "created   ", l.CreatedAt.Local().Format("2006-01-02 15:04")))

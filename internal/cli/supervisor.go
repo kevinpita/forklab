@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/kevinpita/forklab/internal/cli/output"
@@ -102,6 +103,38 @@ func newSupervisorDownCmd(a *app) *cobra.Command {
 	return cmd
 }
 
+// ensureSupervisor returns a client of the lab's supervisor and starts one
+// when none runs. Every command that makes a supervisor start a node comes
+// through here, so the node image of a docker lab is prepared here first:
+// a start request has a deadline of seconds, and a build takes minutes.
 func ensureSupervisor(ctx context.Context, labDir string) (*supervisor.Client, error) {
+	if err := prepareImage(ctx, labDir, noticeWriter(ctx)); err != nil {
+		return nil, err
+	}
 	return supervisor.EnsureRunning(ctx, labDir, supervisor.ForklabSpawner)
+}
+
+// prepareImage builds the node image of the docker lab in labDir when the
+// engine does not have it, and says so on notice first. A lab on the host,
+// and one with an image of its own, need no engine here.
+func prepareImage(ctx context.Context, labDir string, notice io.Writer) error {
+	specs, err := supervisor.LoadNodes(labDir)
+	if err != nil {
+		// The supervisor says what is wrong with nodes.json.
+		return nil
+	}
+	return supervisor.PrepareImage(ctx, specs, func(image string) {
+		_, _ = fmt.Fprintf(notice, "building the node image %s, which the engine does not have; this can take a few minutes\n", image)
+	})
+}
+
+type noticeKey struct{}
+
+// noticeWriter is where a command says what it is waiting for: the stderr
+// that Run was given.
+func noticeWriter(ctx context.Context) io.Writer {
+	if w, ok := ctx.Value(noticeKey{}).(io.Writer); ok {
+		return w
+	}
+	return io.Discard
 }

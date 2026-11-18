@@ -19,10 +19,13 @@ import (
 // supervisor can ask about the same process.
 type runtime interface {
 	// start launches spec's node so it outlives the supervisor, with its
-	// output appended to spec.LogPath. wait blocks until the process exits.
-	start(spec NodeSpec) (pf pidFile, wait func() exitInfo, err error)
+	// output appended to spec.LogPath. wait blocks until the process exits,
+	// or returns false once stop closes: the node then runs on unwatched.
+	start(spec NodeSpec) (pf pidFile, wait func(stop <-chan struct{}) (exitInfo, bool), err error)
 	// alive reports whether the process pf records still runs spec's node.
-	alive(spec NodeSpec, pf pidFile) bool
+	// An error means the runtime could not find out: the node may be
+	// running, and must not be treated as stopped.
+	alive(spec NodeSpec, pf pidFile) (bool, error)
 	// watch blocks until a process this supervisor did not start exits. It
 	// returns false when stop closes first.
 	watch(spec NodeSpec, pf pidFile, stop <-chan struct{}) bool
@@ -37,14 +40,19 @@ type runtime interface {
 }
 
 // runtimeOf returns the runtime that runs spec's node.
-func runtimeOf(NodeSpec) runtime { return hostRuntime{} }
+func runtimeOf(spec NodeSpec) runtime {
+	if spec.Container != nil {
+		return dockerRuntime{}
+	}
+	return hostRuntime{}
+}
 
 // hostRuntime runs a node as a detached host process identified by its pid.
 // Under cosmovisor that process is cosmovisor and the chain binary is its
 // child in the same process group.
 type hostRuntime struct{}
 
-func (hostRuntime) start(spec NodeSpec) (pidFile, func() exitInfo, error) {
+func (hostRuntime) start(spec NodeSpec) (pidFile, func(<-chan struct{}) (exitInfo, bool), error) {
 	pf := pidFile{Binary: spec.Binary}
 	cmd := exec.Command(spec.Binary, spec.Args...)
 	if cv := spec.Cosmovisor; cv != nil {
@@ -57,7 +65,8 @@ func (hostRuntime) start(spec NodeSpec) (pidFile, func() exitInfo, error) {
 	if err := detach(cmd, spec.LogPath); err != nil {
 		return pidFile{}, nil, err
 	}
-	wait := func() exitInfo {
+	exit := make(chan exitInfo, 1)
+	go func() {
 		err := cmd.Wait()
 		e := exitInfo{at: time.Now()}
 		var exitErr *exec.ExitError
@@ -70,7 +79,15 @@ func (hostRuntime) start(spec NodeSpec) (pidFile, func() exitInfo, error) {
 		if spec.Cosmovisor != nil {
 			killOrphans(spec)
 		}
-		return e
+		exit <- e
+	}()
+	wait := func(stop <-chan struct{}) (exitInfo, bool) {
+		select {
+		case e := <-exit:
+			return e, true
+		case <-stop:
+			return exitInfo{}, false
+		}
 	}
 	pf.PID, pf.StartedAt = cmd.Process.Pid, time.Now()
 	return pf, wait, nil
@@ -79,9 +96,10 @@ func (hostRuntime) start(spec NodeSpec) (pidFile, func() exitInfo, error) {
 // alive checks the cmdline too, so a recycled pid, or a zombie whose cmdline
 // is empty, counts as exited. A cosmovisor node is also alive while the
 // chain binary of a cosmovisor that died still runs: it holds the node's
-// database and ports, so the lab is not down.
-func (h hostRuntime) alive(spec NodeSpec, pf pidFile) bool {
-	return h.supervised(spec, pf) || (spec.Cosmovisor != nil && len(chainProcesses(spec)) > 0)
+// database and ports, so the lab is not down. The kernel always answers, so
+// it never fails.
+func (h hostRuntime) alive(spec NodeSpec, pf pidFile) (bool, error) {
+	return h.supervised(spec, pf) || (spec.Cosmovisor != nil && len(chainProcesses(spec)) > 0), nil
 }
 
 // supervised reports whether the process the pid file records runs.

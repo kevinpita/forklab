@@ -67,6 +67,12 @@ For a new lab, inspect the profile and binary source before `lab create`.
 A fresh lab builds genesis. `lab create --fork` imports snapshot state and
 replaces the validator set. Follow [profiles](profiles.md) and
 [fork mode](fork-mode.md) for chain IDs, snapshots, and genesis corrections.
+A lab created with `--runtime docker` runs each node in a container named
+`forklab-<lab>-node<i>` instead of a host process. Its nodes have a
+`container` and no `pid` in `node list --json`, and `runtime` in
+`lab show --json` is `docker`. Use forklab commands to control them, not
+`docker stop` or `docker rm`. Read [docker runtime](docker.md) before you
+run commands inside a container.
 
 For governance, inspect `gov --help` and distinguish these operations:
 
@@ -93,7 +99,8 @@ when the chain is down. `upgrade recover` also supports a stopped chain:
 `--previous` switches binaries and skips the failed height, while `--version`
 retries with a profile version. Recovery restarts validators and verifies
 fresh blocks. It does not restore a database checkpoint. In a lab created
-with `--cosmovisor`, cosmovisor swaps the binary and the node keeps its pid.
+with `--cosmovisor`, cosmovisor swaps the binary and the node keeps its pid,
+or its container on the docker runtime, where a node has no pid.
 forklab only puts the binary where cosmovisor looks. It puts nothing there
 with `--no-auto-swap`, until you run `node restart <i> --binary <version>`,
 and nothing in a lab created with `--cosmovisor-download`, where cosmovisor
@@ -131,6 +138,7 @@ upgrade. Preserve useful report paths and command errors in the handoff.
 - [Profiles](profiles.md): configuration, binaries, denoms, and genesis patches.
 - [Fork mode](fork-mode.md): snapshot discovery, export, and validator takeover.
 - [Upgrades](upgrades.md): schedule, swap, cancel, recover, and reset.
+- [Docker runtime](docker.md): containers per validator, `docker exec`, image, ports, and limits.
 - [Runbooks](runbooks.md): transactions, assertions, pause, stores, scripts, and reports.
 - [TUI](tui.md): forms, governance, runbook builder, keys, and command previews.
 - [Development](development.md): toolchain, checks, extensions, and end-to-end tests.
