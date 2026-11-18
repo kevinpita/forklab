@@ -10,13 +10,15 @@ import (
 	"time"
 )
 
-// pidFile is what a node's pid file holds. Binary is the path the node was
-// started with, which a restart --binary may have changed from nodes.json.
-// LogOffset is where the log subscriber resumes: the end of the log when the
-// node started, advanced as lines are delivered.
+// pidFile is what a node's pid file holds. Binary is the chain binary the
+// node was started with, which a restart --binary may have changed from
+// nodes.json. Exec is the program the pid runs when that is not Binary: the
+// cosmovisor that wraps it. LogOffset is where the log subscriber resumes:
+// the end of the log when the node started, advanced as lines are delivered.
 type pidFile struct {
 	PID       int       `json:"pid"`
 	Binary    string    `json:"binary"`
+	Exec      string    `json:"exec,omitempty"`
 	StartedAt time.Time `json:"started_at"`
 	LogOffset int64     `json:"log_offset"`
 }
@@ -51,7 +53,8 @@ func readPidFile(path string) (pidFile, error) {
 
 // LiveNodes returns the indexes of labDir's nodes whose pid file names a live
 // process running the recorded binary with the node's home, whether or not a
-// supervisor watches it.
+// supervisor watches it. A node without a pid file is asked about too: a
+// runtime may know of a process that no file records.
 func LiveNodes(labDir string) ([]int, error) {
 	specs, err := LoadNodes(labDir)
 	if err != nil {
@@ -60,10 +63,7 @@ func LiveNodes(labDir string) ([]int, error) {
 	var live []int
 	for _, s := range specs {
 		pf, err := readPidFile(s.PidPath)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, err
 		}
 		if runtimeOf(s).alive(s, pf) {

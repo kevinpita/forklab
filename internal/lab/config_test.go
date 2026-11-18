@@ -146,3 +146,28 @@ func TestNodeIDMatchesTheChainCLI(t *testing.T) {
 		t.Fatalf("node id %s, want %s", id, want)
 	}
 }
+
+// A cosmovisor node's client.toml names its own RPC: cosmovisor asks the
+// node for its height through it, and the default port is node0's.
+func TestConfigurePointsClientTOMLAtTheNodesOwnRPCWhenAsked(t *testing.T) {
+	home := homeFrom(t, "simd")
+	client := filepath.Join(home, "config", "client.toml")
+	if err := os.WriteFile(client, []byte("chain-id = \"\"\nnode = \"tcp://localhost:26657\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := allocatePorts(2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		own  bool
+		want string
+	}{{false, `"tcp://localhost:26657"`}, {true, `"tcp://localhost:26757"`}} {
+		if _, err := configure(home, nodeSettings{ports: nodes[1], blockTime: time.Second, feeDenom: "stake", ownClient: c.own}); err != nil {
+			t.Fatal(err)
+		}
+		if _, got, _ := readTOML(t, home, "client.toml").find("node"); got != c.want {
+			t.Errorf("ownClient %t: node = %s, want %s", c.own, got, c.want)
+		}
+	}
+}

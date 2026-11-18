@@ -25,8 +25,9 @@ const (
 // Reset wipes every node's chain data so the lab replays from genesis on its
 // next start. Replaying needs the binary the lab was created with, so every
 // node goes back to it (binary is that path, resolved for Config.Version)
-// in nodes.json and lab.yaml, and any pending upgrade is forgotten. Keys and
-// genesis stay. The lab must be down.
+// in nodes.json and lab.yaml, a cosmovisor tree is dropped so the next start
+// rebuilds it around that binary, and any pending upgrade is forgotten.
+// Keys and genesis stay. The lab must be down.
 func Reset(ctx context.Context, dir, binary string) ([]ResetMethod, error) {
 	c, err := Load(dir)
 	if err != nil {
@@ -57,6 +58,9 @@ func Reset(ctx context.Context, dir, binary string) ([]ResetMethod, error) {
 	methods := make([]ResetMethod, len(specs))
 	for i, s := range specs {
 		if methods[i], err = resetNode(ctx, s); err != nil {
+			return nil, fmt.Errorf("reset %s: %w", s.Name, err)
+		}
+		if err := supervisor.ResetCosmovisor(s); err != nil {
 			return nil, fmt.Errorf("reset %s: %w", s.Name, err)
 		}
 	}

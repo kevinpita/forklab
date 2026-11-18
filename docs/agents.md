@@ -92,7 +92,14 @@ and `--no-auto-swap` leaves the binary changes to the operator.
 when the chain is down. `upgrade recover` also supports a stopped chain:
 `--previous` switches binaries and skips the failed height, while `--version`
 retries with a profile version. Recovery restarts validators and verifies
-fresh blocks. It does not restore a database checkpoint.
+fresh blocks. It does not restore a database checkpoint. In a lab created
+with `--cosmovisor`, cosmovisor swaps the binary and the node keeps its pid.
+forklab only puts the binary where cosmovisor looks. It puts nothing there
+with `--no-auto-swap`, until you run `node restart <i> --binary <version>`,
+and nothing in a lab created with `--cosmovisor-download`, where cosmovisor
+fetches it.
+Check `cosmovisor` in `lab show --json` before you reason about pids or
+binary paths, and read [cosmovisor mode](upgrades.md#cosmovisor-mode).
 
 For repeatable transactions and assertions, read [runbooks](runbooks.md).
 Validate the recipe before `runbook run`, then inspect its saved report,

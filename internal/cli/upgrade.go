@@ -98,6 +98,9 @@ type scheduleView struct {
 	Upgraded bool          `json:"upgraded"`
 	Height   int64         `json:"height,omitempty"`
 	Nodes    []upgradeNode `json:"nodes"`
+	// Cosmovisor is set in a cosmovisor lab, where cosmovisor and not the
+	// supervisor swaps the binary.
+	Cosmovisor bool `json:"cosmovisor,omitempty"`
 }
 
 func (v scheduleView) WriteHuman(w io.Writer) error {
@@ -108,6 +111,8 @@ func (v scheduleView) WriteHuman(w io.Writer) error {
 		_, _ = fmt.Fprintf(w, "upgraded: every node runs %s and the chain is at height %d\n", p.Version, v.Height)
 	case !p.AutoSwap:
 		_, _ = fmt.Fprintf(w, "nodes halt at height %d; restart each with forklab node restart <i> --binary %s\n", p.Height, p.Version)
+	case v.Cosmovisor:
+		_, _ = fmt.Fprintf(w, "cosmovisor swaps each node to %s when it halts; follow with forklab upgrade status\n", p.Version)
 	default:
 		_, _ = fmt.Fprintf(w, "the supervisor swaps each node to %s when it halts; follow with forklab upgrade status\n", p.Version)
 	}
@@ -136,7 +141,13 @@ func newUpgradeScheduleCmd(a *app, ref *string) *cobra.Command {
 			"the supervisor, which restarts each node on the new binary when it halts.\n" +
 			"The command then waits for the swap and for blocks past the plan height.\n" +
 			"--no-auto-swap leaves halted nodes for forklab node restart --binary, and\n" +
-			"--no-wait returns as soon as the plan is registered.",
+			"--no-wait returns as soon as the plan is registered.\n\n" +
+			"In a lab created with --cosmovisor, cosmovisor switches the binary and\n" +
+			"forklab only puts it where cosmovisor looks. With --no-auto-swap forklab\n" +
+			"puts nothing there and forklab node restart --binary delivers it. With\n" +
+			"--cosmovisor-download cosmovisor fetches the binary itself, which needs a\n" +
+			"url source that serves the bare binary or an archive with it at the top\n" +
+			"or in bin.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if progressFormat != "" && progressFormat != "json" {
@@ -144,6 +155,11 @@ func newUpgradeScheduleCmd(a *app, ref *string) *cobra.Command {
 			}
 			if progressFormat == "json" {
 				f.reporter = taskprogress.JSON(cmd.ErrOrStderr())
+			}
+			if f.name != "" {
+				if err := supervisor.PlanName(f.name); err != nil {
+					return output.Usage(err)
+				}
 			}
 			e, err := openLab(*ref)
 			if err != nil {
@@ -191,6 +207,17 @@ func schedule(cmd *cobra.Command, a *app, e labEnv, version string, f scheduleFl
 		return fmt.Errorf("every node already runs version %s", version)
 	}
 	bin, err := resolveBinary(ctx, a, cmd.ErrOrStderr(), e.profile, version, binary.Options{Reporter: f.reporter})
+	if err != nil {
+		return err
+	}
+	download := e.cfg.Cosmovisor != nil && e.cfg.Cosmovisor.Download && !f.noAutoSwap
+	if download && bin.Kind == binary.KindURL && (bin.ArtifactSHA256 == "" || bin.ArtifactEntry == "") {
+		// Cached before these were recorded: fetch it again.
+		if bin, err = resolveBinary(ctx, a, cmd.ErrOrStderr(), e.profile, version, binary.Options{Reporter: f.reporter, Rebuild: true}); err != nil {
+			return err
+		}
+	}
+	info, err := upgradeInfo(bin, download, runtime.GOOS)
 	if err != nil {
 		return err
 	}
@@ -258,7 +285,7 @@ func schedule(cmd *cobra.Command, a *app, e labEnv, version string, f scheduleFl
 		plan.Previous = append(plan.Previous, supervisor.UpgradeTarget{Index: i, Binary: spec.Binary, Version: e.cfg.Nodes[i].Version})
 	}
 
-	p, err := buildProposal(ctx, c, proposalFlags{template: "upgrade", name: name, height: height, info: "forklab upgrade to " + version, expedited: f.expedited})
+	p, err := buildProposal(ctx, c, proposalFlags{template: "upgrade", name: name, height: height, info: info, expedited: f.expedited})
 	if err != nil {
 		return err
 	}
@@ -268,7 +295,7 @@ func schedule(cmd *cobra.Command, a *app, e labEnv, version string, f scheduleFl
 		return err
 	}
 	f.reporter.Emit("upgrade.prepare", fmt.Sprintf("Plan registered at height %d", height), taskprogress.Completed)
-	v := scheduleView{Plan: plan}
+	v := scheduleView{Plan: plan, Cosmovisor: e.cfg.Cosmovisor != nil}
 	v.ProposalID, v.Votes, err = submitAndPass(ctx, c, rpc, e.cfg, p, voting, func(id uint64) {
 		plan.ProposalID = id
 		_, _ = sup.SetUpgrade(&plan)

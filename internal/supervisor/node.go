@@ -25,7 +25,10 @@ type NodeStatus struct {
 	Name   string `json:"name"`
 	State  State  `json:"state"`
 	Binary string `json:"binary"`
-	PID    int    `json:"pid,omitempty"`
+	// Cosmovisor is set when the node runs under cosmovisor: PID is then
+	// cosmovisor's and Binary the chain binary its current link holds.
+	Cosmovisor bool `json:"cosmovisor,omitempty"`
+	PID        int  `json:"pid,omitempty"`
 	// Adopted is set when the process was found via its pid file rather than
 	// started by this supervisor; its exit code is then unknown.
 	Adopted       bool       `json:"adopted,omitempty"`
@@ -89,7 +92,7 @@ type node struct {
 func (n *node) status() NodeStatus {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	st := NodeStatus{Index: n.spec.Index, Name: n.spec.Name, State: StateStopped, Binary: n.spec.Binary, Upgrade: n.swap, SwapError: n.swapErr}
+	st := NodeStatus{Index: n.spec.Index, Name: n.spec.Name, State: StateStopped, Binary: n.binary(), Cosmovisor: n.spec.Cosmovisor != nil, Upgrade: n.swap, SwapError: n.swapErr}
 	if n.halt != nil {
 		halt := *n.halt
 		st.Halt = &halt
@@ -98,7 +101,6 @@ func (n *node) status() NodeStatus {
 		started := p.pf.StartedAt
 		st.State = StateRunning
 		st.PID = p.pf.PID
-		st.Binary = p.pf.Binary
 		st.Adopted = p.adopted
 		st.StartedAt = &started
 		st.UptimeSeconds = int64(time.Since(started).Seconds())
@@ -110,6 +112,17 @@ func (n *node) status() NodeStatus {
 		st.ExitedAt = &at
 	}
 	return st
+}
+
+// binary is the chain binary the node runs, or will on its next start. A
+// running process keeps the one it was started with, except under
+// cosmovisor, which switches binaries below a process that stays: there
+// spec.Binary follows the current link. The caller holds mu.
+func (n *node) binary() string {
+	if n.proc != nil && n.spec.Cosmovisor == nil {
+		return n.proc.pf.Binary
+	}
+	return n.spec.Binary
 }
 
 func (n *node) running() *process {
@@ -131,6 +144,11 @@ func (n *node) start() error {
 		return nil
 	}
 	spec := n.currentSpec()
+	if spec.Cosmovisor != nil {
+		if err := spec.cosmovisorDir().prepare(spec.Binary); err != nil {
+			return fmt.Errorf("start node %d: %w", spec.Index, err)
+		}
+	}
 	logEnd := fileSize(spec.LogPath)
 	pf, wait, err := n.rt.start(spec)
 	if err != nil {
@@ -138,7 +156,7 @@ func (n *node) start() error {
 	}
 	pf.LogOffset = logEnd
 	if err := writePidFile(spec.PidPath, pf); err != nil {
-		_ = n.rt.signal(pf, syscall.SIGKILL)
+		_ = n.rt.signal(spec, pf, syscall.SIGKILL, false)
 		wait()
 		return fmt.Errorf("start node %d: %w", spec.Index, err)
 	}
@@ -157,6 +175,7 @@ func (n *node) adopt() error {
 	spec := n.currentSpec()
 	pf, err := readPidFile(spec.PidPath)
 	if errors.Is(err, os.ErrNotExist) {
+		n.rt.reap(spec)
 		return nil
 	}
 	if err != nil {
@@ -241,7 +260,7 @@ func (n *node) signal(sig syscall.Signal, timeout time.Duration) error {
 		<-p.gone
 		return nil
 	}
-	if err := n.rt.signal(p.pf, sig); err != nil {
+	if err := n.rt.signal(n.currentSpec(), p.pf, sig, p.adopted); err != nil {
 		return fmt.Errorf("signal node %d: %w", n.spec.Index, err)
 	}
 	select {

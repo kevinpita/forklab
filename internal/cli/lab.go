@@ -73,7 +73,15 @@ func (v labView) WriteHuman(w io.Writer) error {
 	if v.ChainIDSource != "" {
 		chain += " (from " + v.ChainIDSource + ")"
 	}
-	_, _ = fmt.Fprintf(w, "profile %s, version %s, chain %s, %d validators\n\n", v.Profile.Name, versionText(v.Config), chain, v.Validators)
+	_, _ = fmt.Fprintf(w, "profile %s, version %s, chain %s, %d validators\n", v.Profile.Name, versionText(v.Config), chain, v.Validators)
+	if cv := v.Cosmovisor; cv != nil {
+		delivery := "forklab places upgrade binaries"
+		if cv.Download {
+			delivery = "cosmovisor downloads upgrade binaries"
+		}
+		_, _ = fmt.Fprintf(w, "cosmovisor %s, %s\n", cv.Path, delivery)
+	}
+	_, _ = fmt.Fprintln(w)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "NODE\tVERSION\tRPC\tNODE ID\tPORTS")
 	for _, n := range v.Nodes {
@@ -106,8 +114,8 @@ func (v labView) WriteHuman(w io.Writer) error {
 
 func newLabCreateCmd(a *app) *cobra.Command {
 	var in lab.CreateInput
-	var profileName, fork, progressFormat string
-	var keepWork bool
+	var profileName, fork, progressFormat, cosmovisorPath string
+	var keepWork, cosmovisor, cosmovisorDownload bool
 	var binaries binaryFlags
 	cmd := &cobra.Command{
 		Use:   "create <name>",
@@ -143,6 +151,12 @@ func newLabCreateCmd(a *app) *cobra.Command {
 			in.Name = args[0]
 			if err := lab.CheckName(in.Name); err != nil {
 				return output.Usage(err)
+			}
+			if cosmovisorPath != "" {
+				// Checked before a snapshot or a binary is fetched for a lab that cannot be made.
+				if cosmovisorPath, err = cosmovisorBin(cosmovisorPath); err != nil {
+					return err
+				}
 			}
 			root, err := paths.Home()
 			if err != nil {
@@ -180,6 +194,15 @@ func newLabCreateCmd(a *app) *cobra.Command {
 				b, err := resolveBinary(ctx, a, cmd.ErrOrStderr(), p, in.Version, binary.Options{Reporter: in.Reporter})
 				return b.Path, err
 			}
+			if cosmovisor || cosmovisorDownload || cosmovisorPath != "" {
+				in.CosmovisorDownload = cosmovisorDownload
+				in.Cosmovisor = func(ctx context.Context) (string, error) {
+					if cosmovisorPath != "" {
+						return cosmovisorPath, nil
+					}
+					return resolveCosmovisor(ctx, a, cmd.ErrOrStderr(), binary.Options{Reporter: in.Reporter})
+				}
+			}
 			l, err := labs()
 			if err != nil {
 				return err
@@ -201,6 +224,9 @@ func newLabCreateCmd(a *app) *cobra.Command {
 	cmd.Flags().StringVar(&in.ChainID, "chain-id", "", "chain ID (default: the profile's)")
 	cmd.Flags().StringVar(&fork, "fork", "", "fork the chain state of a snapshot: a profile snapshot name, a URL, or a .tar.lz4|gz|zst file; the lab runs as the profile's chain_id unless --chain-id is set")
 	cmd.Flags().BoolVar(&keepWork, "keep-snapshot-work", false, "keep the extracted snapshot data after the export instead of deleting it")
+	cmd.Flags().BoolVar(&cosmovisor, "cosmovisor", false, "run every node under cosmovisor, which then switches binaries at an upgrade")
+	cmd.Flags().BoolVar(&cosmovisorDownload, "cosmovisor-download", false, "let cosmovisor download upgrade binaries from the plan info instead of forklab placing them (implies --cosmovisor)")
+	cmd.Flags().StringVar(&cosmovisorPath, "cosmovisor-bin", "", "cosmovisor binary to use instead of the version forklab pins (implies --cosmovisor)")
 	_ = cmd.MarkFlagRequired("profile")
 	_ = cmd.MarkFlagRequired("version")
 	return cmd

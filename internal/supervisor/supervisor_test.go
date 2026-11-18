@@ -72,11 +72,14 @@ func (h *harness) lab(n int, nodeArgs ...string) *lab {
 // killLab SIGKILLs the supervisor and every node whose pid file names a
 // process whose cmdline mentions the lab, whatever binary path it runs, and
 // waits until each is gone so nothing writes under the lab once it returns.
+// The signal goes to the process group, which a cosmovisor node shares with
+// the chain binary it runs.
 func killLab(l *lab) {
 	var killed []int
 	kill := func(pid int, marker string) {
 		if pid > 0 && pid != os.Getpid() && cmdlineHas(pid, marker) {
 			_ = syscall.Kill(pid, syscall.SIGKILL)
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
 			killed = append(killed, pid)
 		}
 	}
@@ -628,6 +631,11 @@ func TestLoadNodesRejectsBadFiles(t *testing.T) {
 		{"index gap", []supervisor.NodeSpec{good, func() supervisor.NodeSpec { s := good; s.Index = 2; return s }()}, "node 1 has index 2"},
 		{"missing pid path", []supervisor.NodeSpec{func() supervisor.NodeSpec { s := good; s.PidPath = ""; return s }()}, "needs binary, home, log_path, and pid_path"},
 		{"home not in args", []supervisor.NodeSpec{func() supervisor.NodeSpec { s := good; s.Args = []string{"start"}; return s }()}, "do not mention its home"},
+		{"cosmovisor without the chain binary's name", []supervisor.NodeSpec{func() supervisor.NodeSpec {
+			s := good
+			s.Cosmovisor = &supervisor.Cosmovisor{Path: "/bin/cv"}
+			return s
+		}()}, "cosmovisor needs path and name"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -648,6 +656,40 @@ func TestLoadNodesRejectsBadFiles(t *testing.T) {
 	specs, err := supervisor.LoadNodes(dir)
 	if err != nil || len(specs) != 1 || specs[0].Name != "node0" {
 		t.Errorf("round trip = %+v, %v", specs, err)
+	}
+}
+
+func TestNodesFileOfAnEarlierForklabRoundTrips(t *testing.T) {
+	const earlier = `[
+  {
+    "index": 0,
+    "name": "node0",
+    "binary": "/bin/x",
+    "args": [
+      "start",
+      "--home",
+      "/h"
+    ],
+    "home": "/h",
+    "log_path": "/h/log",
+    "pid_path": "/h/pid"
+  }
+]
+`
+	dir := t.TempDir()
+	path := supervisor.Paths{Dir: dir}.Nodes()
+	if err := os.WriteFile(path, []byte(earlier), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	specs, err := supervisor.LoadNodes(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := supervisor.SaveNodes(dir, specs); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != earlier {
+		t.Errorf("nodes.json changed:\n%s\nwant it as the earlier forklab wrote it:\n%s", got, earlier)
 	}
 }
 

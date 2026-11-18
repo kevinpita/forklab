@@ -43,6 +43,16 @@ func TestResetRunsTheChainsCometReset(t *testing.T) {
 		})
 		c.Nodes = append(c.Nodes, Node{Index: i, Name: name, Version: "2.0.0"})
 	}
+	specs[0].Cosmovisor = &supervisor.Cosmovisor{Path: bin, Name: "chaind"}
+	tree, info := filepath.Join(specs[0].Home, "cosmovisor"), filepath.Join(specs[0].Home, "data", "upgrade-info.json")
+	for _, d := range []string{filepath.Join(tree, "upgrades", "v2", "bin"), filepath.Dir(info)} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(info, []byte(`{"name":"v2"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := supervisor.SaveNodes(dir, specs); err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +82,11 @@ func TestResetRunsTheChainsCometReset(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(upgraded), "calls.log")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the reset ran the upgraded binary: %v", err)
+	}
+	for _, path := range []string{tree, info} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s survived the reset, so the next start would not rebuild it around the creation binary: %v", path, err)
+		}
 	}
 	calls, _ := os.ReadFile(filepath.Join(dir, "calls.log"))
 	want := "comet unsafe-reset-all --keep-addr-book --home " + specs[0].Home + "\n" +

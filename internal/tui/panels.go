@@ -747,6 +747,13 @@ func labMain(m *Model, _, _ int) mainView {
 		kv(th, "version   ", l.Version),
 		kv(th, "validators", strconv.Itoa(l.Validators)),
 	)
+	if cv := l.Cosmovisor; cv != nil {
+		delivery := "forklab places upgrade binaries"
+		if cv.Download {
+			delivery = "downloads upgrade binaries"
+		}
+		lines = append(lines, kv(th, "cosmovisor", delivery))
+	}
 	if l.CreatedAt != nil {
 		lines = append(lines, kv(th, "created   ", l.CreatedAt.Local().Format("2006-01-02 15:04")))
 	}

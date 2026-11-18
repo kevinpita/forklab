@@ -2,12 +2,14 @@ package supervisor_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -97,6 +99,8 @@ func runChild(role string, args []string) int {
 		return 0
 	case "fake-node":
 		return fakeNode(args)
+	case "run":
+		return fakeCosmovisor(args)
 	}
 	fmt.Fprintln(os.Stderr, "unknown child role", role)
 	return 2
@@ -155,10 +159,11 @@ func testSpawner(labDir string) (*exec.Cmd, error) {
 // fakeNode stands in for a chain binary: it prints a line every 50ms, exits
 // 0 on SIGTERM unless --ignore-term, and exits with --crash-code on SIGUSR1.
 // With --halt name:height[,name:height...] it logs, after --halt-delay,
-// the upgrade halt x/upgrade would for the first plan its release lacks
-// and exits 1, or keeps running with --halt-stay. A copy of the binary
-// named *-<name> stands for the release that carries plan <name> and all
-// plans listed before it.
+// the upgrade halt x/upgrade would for the first plan its release lacks,
+// writes the plan to data/upgrade-info.json, and exits 1, or keeps running
+// with --halt-stay. A copy of the binary named *-<name>, or one in a
+// cosmovisor upgrades/<name> directory, stands for the release that carries
+// plan <name> and all plans listed before it.
 func fakeNode(args []string) int {
 	fs := flag.NewFlagSet("fake-node", flag.ContinueOnError)
 	home := fs.String("home", "", "node home")
@@ -178,7 +183,7 @@ func fakeNode(args []string) int {
 	plans := strings.Split(*halt, ",")
 	next := 0
 	for i, plan := range plans {
-		if n, _, _ := strings.Cut(plan, ":"); strings.HasSuffix(os.Args[0], "-"+n) {
+		if n, _, _ := strings.Cut(plan, ":"); strings.HasSuffix(os.Args[0], "-"+n) || strings.Contains(os.Args[0], "/upgrades/"+strings.ToLower(n)+"/") {
 			next = i + 1
 		}
 	}
@@ -192,6 +197,8 @@ func fakeNode(args []string) int {
 		case <-haltAt:
 			fmt.Printf("\x1b[90m1:02PM\x1b[0m \x1b[31mERR\x1b[0m \x1b[1mUPGRADE %q NEEDED at height: %s: module=x/upgrade\x1b[0m\n", name, height)
 			fmt.Printf("ERR CONSENSUS FAILURE!!! err=\"failed to apply block; error UPGRADE \\\"%s\\\" NEEDED at height: %s\" module=consensus\n", name, height)
+			_ = os.MkdirAll(filepath.Join(*home, "data"), 0o755)
+			_ = os.WriteFile(filepath.Join(*home, "data", "upgrade-info.json"), fmt.Appendf(nil, `{"name":%q,"height":%s}`, name, height), 0o644)
 			if !*haltStay {
 				return 1
 			}
@@ -210,5 +217,61 @@ func fakeNode(args []string) int {
 				return 0
 			}
 		}
+	}
+}
+
+// fakeCosmovisor stands in for cosmovisor, as `<bin> run <node args>` with
+// DAEMON_HOME and DAEMON_NAME: it runs the binary its current link names
+// and forwards SIGTERM to it. When that binary exits leaving an
+// upgrade-info.json for a plan the link does not name, it moves the link
+// to upgrades/<plan> and runs the binary there, or exits 1 when there is
+// none.
+func fakeCosmovisor(args []string) int {
+	home, name := os.Getenv("DAEMON_HOME"), os.Getenv("DAEMON_NAME")
+	root := filepath.Join(home, "cosmovisor")
+	current := filepath.Join(root, "current")
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGTERM)
+	for {
+		dir, err := filepath.EvalSymlinks(current)
+		if err != nil {
+			fmt.Println(err)
+			return 1
+		}
+		cmd := exec.Command(filepath.Join(dir, "bin", name), args...)
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		if err := cmd.Start(); err != nil {
+			fmt.Println(err)
+			return 1
+		}
+		done := make(chan struct{})
+		go func() {
+			_ = cmd.Wait()
+			close(done)
+		}()
+		select {
+		case <-sigs:
+			_ = cmd.Process.Signal(syscall.SIGTERM)
+			<-done
+			return cmd.ProcessState.ExitCode()
+		case <-done:
+		}
+		var info struct {
+			Name string `json:"name"`
+		}
+		data, _ := os.ReadFile(filepath.Join(home, "data", "upgrade-info.json"))
+		_ = json.Unmarshal(data, &info)
+		// Cosmovisor lower-cases the plan name before it looks for the slot.
+		slot := filepath.Join("upgrades", strings.ToLower(info.Name))
+		if link, _ := os.Readlink(current); info.Name == "" || link == slot {
+			return cmd.ProcessState.ExitCode()
+		}
+		if _, err := os.Stat(filepath.Join(root, slot, "bin", name)); err != nil {
+			fmt.Println("Error: binary not present, downloading disabled")
+			return 1
+		}
+		_ = os.Remove(current)
+		_ = os.Symlink(slot, current)
+		_ = os.WriteFile(filepath.Join(root, slot, "upgrade-info.json"), data, 0o644)
 	}
 }

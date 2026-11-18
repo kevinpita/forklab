@@ -55,6 +55,58 @@ func TestLabYAMLRoundTrip(t *testing.T) {
 	if got.Nodes[0].RPCPort() != 26657 {
 		t.Fatalf("rpc port %d, want 26657", got.Nodes[0].RPCPort())
 	}
+	// A lab without the newer settings is written as an earlier forklab
+	// wrote it, which rejects fields it does not know.
+	if data, _ := os.ReadFile(filepath.Join(dir, configFile)); strings.Contains(string(data), "cosmovisor") || strings.Contains(string(data), "runtime") {
+		t.Errorf("lab.yaml of a plain lab carries a newer setting:\n%s", data)
+	}
+}
+
+// A lab.yaml as the forklab before cosmovisor mode wrote it: Load rejects
+// unknown fields, so a renamed one would lock every existing lab out.
+func TestLoadReadsALabOfAnEarlierForklab(t *testing.T) {
+	const earlier = `name: demo
+mode: fork
+chain_id: xrplevm_1440000-1
+version: 11.1.1
+validators: 1
+created_at: 2026-09-30T12:00:00Z
+profile:
+    name: xrplevm
+    binary_name: exrpd
+    chain_id: xrplevm_1440000-1
+fork:
+    source: polkachu
+    archive: /cache/snap.tar.lz4
+    height: 100
+nodes:
+    - index: 0
+      name: node0
+      version: 11.1.1
+      node_id: 7fd4befd0aa6669059db3b22696fe49ff3c8e4f5
+      operator: ethmvaloper1x
+      ports:
+        - file: config.toml
+          key: rpc.laddr
+          port: 26657
+accounts:
+    - name: val0
+      address: ethm1rjx08x0d4dw44a7htfu5hddtp3f4gtv7jknvvp
+`
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, configFile), []byte(earlier), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Name != "demo" || c.Mode != ModeFork || c.ChainID != "xrplevm_1440000-1" || c.Version != "11.1.1" || c.Validators != 1 || c.CreatedAt.IsZero() ||
+		c.Profile.Name != "xrplevm" || c.Fork == nil || c.Fork.Source != "polkachu" || c.Fork.Archive != "/cache/snap.tar.lz4" || c.Fork.Height != 100 ||
+		c.Nodes[0].Name != "node0" || c.Nodes[0].Version != "11.1.1" || c.Nodes[0].NodeID == "" || c.Nodes[0].Operator != "ethmvaloper1x" || c.Nodes[0].RPCPort() != 26657 ||
+		c.Accounts[0].Name != "val0" || c.Accounts[0].Address == "" || c.Cosmovisor != nil {
+		t.Errorf("an earlier lab.yaml loaded as %+v", c)
+	}
 }
 
 func TestLoadRejectsUnknownFields(t *testing.T) {

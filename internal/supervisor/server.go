@@ -311,7 +311,13 @@ func (s *supervisor) each(req Request) error {
 func (s *supervisor) apply(n *node, req Request, timeout time.Duration) error {
 	switch req.Op {
 	case OpStart:
-		return n.start()
+		if err := n.start(); err != nil {
+			return err
+		}
+		if s.syncCosmovisor(n, s.pending()) {
+			s.settleSwap(n, n.currentSpec().Binary)
+		}
+		return nil
 	case OpStop:
 		return n.signal(syscall.SIGTERM, timeout)
 	case OpKill:
@@ -357,14 +363,26 @@ func (s *supervisor) restart(n *node, binary, version string, timeout time.Durat
 			return fmt.Errorf("restart node %d: %w", n.spec.Index, err)
 		}
 	}
+	relinked := false
 	restore := func(err error) error {
 		n.mu.Lock()
 		n.spec.Binary = previous
 		n.mu.Unlock()
+		if relinked {
+			if err := s.relink(n, previous); err != nil {
+				s.log.Printf("node %d: restore %s: %v", n.spec.Index, previous, err)
+			}
+		}
 		return err
 	}
 	if err := n.signal(syscall.SIGTERM, timeout); err != nil {
 		return restore(err)
+	}
+	if binary != "" && n.currentSpec().Cosmovisor != nil {
+		relinked = true
+		if err := s.relink(n, binary); err != nil {
+			return restore(fmt.Errorf("restart node %d: %w", n.spec.Index, err))
+		}
 	}
 	logEnd := fileSize(n.currentSpec().LogPath)
 	if err := n.start(); err != nil {
@@ -393,6 +411,7 @@ func (s *supervisor) restart(n *node, binary, version string, timeout time.Durat
 		s.log.Printf("node %d: record version %s: %v", n.spec.Index, version, err)
 	}
 	// Swapped means recorded, so the halt is settled last.
+	s.syncCosmovisor(n, s.pending())
 	s.settleSwap(n, n.currentSpec().Binary)
 	return nil
 }

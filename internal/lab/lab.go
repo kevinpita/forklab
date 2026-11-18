@@ -48,8 +48,19 @@ type Config struct {
 	CreatedAt  time.Time        `yaml:"created_at" json:"created_at"`
 	Profile    profile.Document `yaml:"profile" json:"profile"`
 	Fork       *Fork            `yaml:"fork,omitempty" json:"fork,omitempty"`
+	Cosmovisor *Cosmovisor      `yaml:"cosmovisor,omitempty" json:"cosmovisor,omitempty"`
 	Nodes      []Node           `yaml:"nodes" json:"nodes"`
 	Accounts   []Account        `yaml:"accounts" json:"accounts"`
+}
+
+// Cosmovisor records that the lab's nodes run under cosmovisor, which then
+// switches binaries at an upgrade.
+type Cosmovisor struct {
+	// Path is the cosmovisor binary.
+	Path string `yaml:"path" json:"path"`
+	// Download makes cosmovisor fetch an upgrade binary from the links in
+	// the plan info; forklab then places none.
+	Download bool `yaml:"download,omitempty" json:"download,omitempty"`
 }
 
 // Fork records the chain state a fork lab started from.

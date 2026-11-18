@@ -46,16 +46,16 @@ For tab completion and the `fl`, `flab`, and `flogs` helpers, see
 | `binary fetch <version> --profile <p>` | Download or build a binary into the cache |
 | `binary build <version> --profile <p>` | Rebuild a `git` or `src` binary |
 | `binary list` | List cached binaries |
-| `lab create <name> --profile <p> --version <v>` | Create a fresh lab, or a forked one with `--fork` |
+| `lab create <name> --profile <p> --version <v>` | Create a fresh lab, or a forked one with `--fork`; `--cosmovisor` runs the nodes under cosmovisor |
 | `lab list` | List labs |
 | `lab show <name>` | Show nodes, ports, and keys (`--show-mnemonics` for mnemonics) |
 | `lab up <name>` | Start the supervisor and nodes and wait for blocks |
-| `lab down <name>` | Stop the nodes and the supervisor |
+| `lab down <name>` | Stop the nodes and the supervisor; fails with `nodes [...] still run after the lab was taken down` when a node process could not be ended |
 | `lab pause <name> --height <H>` | Freeze at committed application height H while keeping query RPC available |
 | `lab resume <name>` | Restore normal node arguments and verify commits resume |
 | `lab reset <name>` | Wipe chain data and replay from genesis (`--force` stops the lab first) |
 | `lab delete <name>` | Delete a stopped lab |
-| `node list` | Show each node's state, pid, uptime, and binary |
+| `node list` | Show each node's state, pid, uptime, and binary; a pid marked `(cosmovisor)` is cosmovisor running the binary |
 | `node start <i\|all>` | Start a node or all nodes |
 | `node stop <i\|all>` | Stop with SIGTERM |
 | `node kill <i\|all>` | Kill with SIGKILL to simulate a crash |
@@ -69,7 +69,7 @@ For tab completion and the `fl`, `flab`, and `flogs` helpers, see
 | `gov vote <id> <option>` | Vote yes, no, abstain, or veto from lab keys |
 | `gov list` | List proposals |
 | `gov show <id>` | Show a proposal and its tally |
-| `upgrade schedule <version>` | Schedule an upgrade at `--height` or `--in` blocks and swap binaries at the halt |
+| `upgrade schedule <version>` | Schedule an upgrade at `--height` or `--in` blocks and swap binaries at the halt, or let cosmovisor swap them in a cosmovisor lab |
 | `upgrade cancel` | Cancel the scheduled upgrade through governance |
 | `upgrade recover` | Switch to previous binaries and skip the failed height with `--previous`, or retry with `--version` |
 | `upgrade status` | Show the plan and each node's version and swap state |
@@ -84,7 +84,8 @@ For tab completion and the `fl`, `flab`, and `flogs` helpers, see
 | `version` | Print the forklab version |
 
 Run `forklab <command> --help` for every flag. [Upgrades](upgrades.md) and
-[Fork mode](fork-mode.md) cover `upgrade` and `lab create --fork` in depth.
+[Fork mode](fork-mode.md) cover `upgrade`, `lab create --cosmovisor`, and
+`lab create --fork` in depth.
 [Runbooks](runbooks.md) covers YAML recipes, templates, exact-height pause,
 manual resume, and raw store inspection.
 

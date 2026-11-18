@@ -68,6 +68,14 @@ type Binary struct {
 	Path            string `json:"path"`
 	ReportedVersion string `json:"reported_version"`
 	Check           Check  `json:"version_check"`
+	// ArtifactSHA256 is the sha256 of what a url source served, the archive
+	// or the bare binary, for a consumer that downloads it again.
+	ArtifactSHA256 string `json:"artifact_sha256,omitempty"`
+	// ArtifactEntry is the archive member the binary was taken from, or the
+	// binary's name when the url served the bare binary. forklab finds the
+	// binary at any depth; a consumer that downloads the artifact again may
+	// not.
+	ArtifactEntry string `json:"artifact_entry,omitempty"`
 	// Size and ModTime fingerprint the file at Path when it was checked. A
 	// cached entry is reused only while the file still matches.
 	Size    int64 `json:"size"`
@@ -163,7 +171,7 @@ func (c Cache) Resolve(ctx context.Context, p profile.Profile, version string, o
 	case profile.URLSource:
 		o.Reporter.Emit("binary.download", "Downloading binary", progress.Started)
 		previous := o.Progress
-		err = fetch(ctx, b.Source, p.BinaryName, stage, staged, func(done, total int64) {
+		b.ArtifactSHA256, b.ArtifactEntry, err = fetch(ctx, b.Source, p.BinaryName, stage, staged, func(done, total int64) {
 			if previous != nil {
 				previous(done, total)
 			}

@@ -4,10 +4,13 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -50,6 +53,36 @@ func TestDownloadProgressPicksUnitsBySize(t *testing.T) {
 		(&progress{w: &buf, last: -1}).update(c.done, c.total)
 		if buf.String() != c.want {
 			t.Errorf("update(%d, %d) = %q, want %q", c.done, c.total, buf.String(), c.want)
+		}
+	}
+}
+
+func TestUpgradeInfoCarriesTheDownloadLinkOnlyWhenCosmovisorDownloads(t *testing.T) {
+	at := func(source, entry string) binary.Binary {
+		return binary.Binary{Profile: "chain", Version: "2.0.0", Kind: binary.KindURL, Source: source, Path: "/cache/chaind", ArtifactSHA256: "abc", ArtifactEntry: entry}
+	}
+	url := at("https://x/chain.tar.gz", "bin/chaind")
+	link := `{"binaries":{"plan9/` + runtime.GOARCH + `":"`
+	for _, c := range []struct {
+		name     string
+		bin      binary.Binary
+		download bool
+		want     string
+		wantErr  string
+	}{
+		{name: "placed by forklab", bin: url, want: "forklab upgrade to 2.0.0"},
+		{name: "download", bin: url, download: true, want: link + `https://x/chain.tar.gz?checksum=sha256:abc"}}`},
+		{name: "binary at the archive root", bin: at("https://x/chain.zip", "chaind"), download: true, want: link + `https://x/chain.zip?checksum=sha256:abc"}}`},
+		{name: "url with a query", bin: at("https://x/get?file=chain", "chaind"), download: true, want: link + `https://x/get?file=chain\u0026checksum=sha256:abc"}}`},
+		{name: "url with a fragment", bin: at("https://x/chaind#v2", "chaind"), download: true, want: link + `https://x/chaind?checksum=sha256:abc#v2"}}`},
+		{name: "path source", bin: binary.Binary{Profile: "chain", Version: "2.0.0", Kind: binary.KindPath}, download: true, wantErr: "needs a url source: version 2.0.0 of profile chain is a path source"},
+		{name: "binary deeper in the archive", bin: at("https://x/chain.tar.gz", "dist/linux/chaind"), download: true, wantErr: "cosmovisor looks for chaind or bin/chaind at the top of the archive, and https://x/chain.tar.gz has it at dist/linux/chaind"},
+		{name: "archive cosmovisor cannot unpack", bin: at("https://x/chain.tar.lz4", "bin/chaind"), download: true, wantErr: "cosmovisor cannot unpack a .tar.lz4 archive"},
+		{name: "placed by forklab from any archive", bin: at("https://x/chain.tar.lz4", "dist/linux/chaind"), want: "forklab upgrade to 2.0.0"},
+	} {
+		got, err := upgradeInfo(c.bin, c.download, "plan9")
+		if got != c.want || (err == nil) != (c.wantErr == "") || (err != nil && !strings.Contains(err.Error(), c.wantErr)) {
+			t.Errorf("%s: upgradeInfo = %q, %v; want %q, error %q", c.name, got, err, c.want, c.wantErr)
 		}
 	}
 }
@@ -99,6 +132,7 @@ func TestBinaryFetchListJSON(t *testing.T) {
 		Source:          fetched.Data.Source,
 		Path:            fetched.Data.Path,
 		ReportedVersion: "v1.2.3", Check: binary.CheckMatched,
+		ArtifactSHA256: fmt.Sprintf("%x", sha256.Sum256(archive)), ArtifactEntry: "bin/simd",
 		Size: fetched.Data.Size, ModTime: fetched.Data.ModTime,
 	}
 	if !strings.HasPrefix(fetched.Data.Path, filepath.Join(home, "bin", "chain")+string(filepath.Separator)) || filepath.Base(fetched.Data.Path) != "simd" || !fetched.OK || fetched.Data != want || !strings.HasPrefix(want.Source, srv.URL+"/simd_1.2.3_") {

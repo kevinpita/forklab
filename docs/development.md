@@ -52,6 +52,7 @@ chain binaries or homes:
 | `FORKLAB_SIMD` | A `simd` v0.53.8 binary (cli and genesis tests) |
 | `FORKLAB_EXRPD` | An `exrpd` v11.1.1 binary (cli and genesis tests) |
 | `FORKLAB_EXRPD_OLD`, `FORKLAB_EXRPD_NEW` | `exrpd` v11.1.1 and v11.2.0 binaries for the upgrade tests |
+| `FORKLAB_COSMOVISOR` | The `cosmovisor` forklab pins (see below), with the two above, for the cosmovisor upgrade tests |
 | `FORKLAB_SIMD_MAINNET`, `FORKLAB_EXRPD_MAINNET` | A stopped node home (`data/` and `config/genesis.json`) that the fork tests pack into a snapshot |
 | `FORKLAB_RPC` | The CometBFT RPC of a live node, for `go test -tags e2e ./internal/chain` |
 
@@ -63,6 +64,18 @@ chain binaries or homes:
 > ```sh
 > unshare -rn sh -c 'ip link set lo up && go test -tags e2e ./internal/cli'
 > ```
+
+The cosmovisor tests need the build forklab pins, not a release: they check
+that a node stops cleanly after an upgrade, which cosmovisor v1.7.3 does not
+do. `internal/binary/cosmovisor.go` names the commit. Build it once:
+
+```sh
+git init cosmos-sdk && cd cosmos-sdk
+git fetch --depth 1 https://github.com/cosmos/cosmos-sdk 58bf3aad378754cecfcbc59744aedee39c38893b
+git checkout FETCH_HEAD
+(cd tools/cosmovisor && CGO_ENABLED=0 go build -o /tmp/cosmovisor ./cmd/cosmovisor)
+export FORKLAB_COSMOVISOR=/tmp/cosmovisor
+```
 
 ## Screenshots
 

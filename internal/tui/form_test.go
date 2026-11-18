@@ -160,6 +160,11 @@ func TestFormArgv(t *testing.T) {
 			"forklab lab create f --profile xrplevm --version 11.1.1 --validators 2 --fork /tmp/s.tar.lz4 --chain-id xrplevm_1449999-1 --json",
 		},
 		{
+			"lab create cosmovisor", labForm,
+			map[string]string{"name": "cv", "profile": "lsimd", "version": "0.53.8", "upgrades": "download", "cosmovisor-bin": "/x/cosmovisor"},
+			"forklab lab create cv --profile lsimd --version 0.53.8 --validators 2 --cosmovisor-download --cosmovisor-bin /x/cosmovisor --json",
+		},
+		{
 			"first-lab wizard", wizard,
 			map[string]string{"profile": "lsimd", "version": "0.53.8"},
 			"forklab lab create devnet --profile lsimd --version 0.53.8 --validators 2 --json",

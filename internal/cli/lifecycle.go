@@ -54,7 +54,8 @@ func resolveLab(arg string) (string, error) {
 
 // downLab stops every node and the supervisor. Nodes left behind by a
 // killed supervisor get a new one that adopts them and stops them. It
-// returns false when there was nothing to stop.
+// returns false when there was nothing to stop, and fails when a node
+// still runs afterwards: the caller may be about to wipe or delete the lab.
 func downLab(ctx context.Context, dir string, timeout time.Duration) ([]supervisor.NodeStatus, bool, error) {
 	c, err := supervisor.Dial(dir)
 	if err != nil {
@@ -67,7 +68,15 @@ func downLab(ctx context.Context, dir string, timeout time.Duration) ([]supervis
 		}
 	}
 	nodes, err := c.Down(timeout)
-	return nodes, true, err
+	if err != nil {
+		return nodes, true, err
+	}
+	if live, err := supervisor.LiveNodes(dir); err != nil {
+		return nodes, true, err
+	} else if len(live) > 0 {
+		return nodes, true, fmt.Errorf("nodes %v still run after the lab was taken down; end their processes by hand", live)
+	}
+	return nodes, true, nil
 }
 
 type upNode struct {

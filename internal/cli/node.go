@@ -50,6 +50,9 @@ func (l nodeList) WriteHuman(w io.Writer) error {
 			if n.Adopted {
 				pid += " (adopted)"
 			}
+			if n.Cosmovisor {
+				pid += " (cosmovisor)"
+			}
 		case supervisor.StateExited:
 			exit = exitOf(n)
 		}

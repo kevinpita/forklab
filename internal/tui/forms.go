@@ -416,6 +416,16 @@ func labCreateSpec(m *Model, wizard bool) *formSpec {
 		}, hint: "URL or local .tar.lz4, .tar.gz, or .tar.zst archive"},
 		{key: "chain-id", label: "Chain ID", kind: fieldText, optional: true, placeholder: "Profile (unavailable)", placeholderFrom: profileChainID, check: checkName},
 	}...)
+	if !wizard {
+		fields = append(fields, []fieldSpec{
+			{
+				key: "upgrades", label: "Upgrades", kind: fieldSelect, def: "forklab",
+				options: []option{{"forklab", "forklab swaps binaries"}, {"cosmovisor", "cosmovisor swaps binaries"}, {"download", "cosmovisor downloads binaries"}},
+				hint:    "Cosmovisor runs each node and switches binaries at an upgrade, as on a real validator.",
+			},
+			{key: "cosmovisor-bin", label: "Cosmovisor", kind: fieldText, optional: true, placeholder: "pinned version, built on first use", show: func(v values) bool { return v["upgrades"] != "" && v["upgrades"] != "forklab" }, hint: "path of a cosmovisor binary to use instead"},
+		}...)
+	}
 
 	if wizard {
 		name.def = "devnet"
@@ -448,6 +458,15 @@ func labCreateSpec(m *Model, wizard bool) *formSpec {
 			}
 			if v["chain-id"] != "" {
 				c = append(c, "--chain-id", v["chain-id"])
+			}
+			switch v["upgrades"] {
+			case "cosmovisor":
+				c = append(c, "--cosmovisor")
+			case "download":
+				c = append(c, "--cosmovisor-download")
+			}
+			if v["cosmovisor-bin"] != "" && (v["upgrades"] == "cosmovisor" || v["upgrades"] == "download") {
+				c = append(c, "--cosmovisor-bin", v["cosmovisor-bin"])
 			}
 			return c
 		},

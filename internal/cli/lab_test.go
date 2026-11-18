@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kevinpita/forklab/internal/lab"
@@ -72,5 +73,14 @@ func TestLabListKeepsBrokenLabsAndDeleteRemovesThem(t *testing.T) {
 	}
 	if _, err := os.Stat(broken); !os.IsNotExist(err) {
 		t.Fatalf("broken lab still exists: %v", err)
+	}
+}
+
+func TestLabCreateChecksCosmovisorBinBeforeItReachesForASnapshot(t *testing.T) {
+	t.Setenv("FORKLAB_HOME", t.TempDir())
+	code, _, stderr := run("lab", "create", "demo", "--profile", "simd", "--version", "0.53.8",
+		"--fork", "http://127.0.0.1:1/snapshot.tar.lz4", "--cosmovisor-bin", filepath.Join(t.TempDir(), "absent"))
+	if code != 2 || !strings.Contains(stderr, "--cosmovisor-bin") {
+		t.Errorf("exit %d, want the usage error 2 about --cosmovisor-bin: %s", code, stderr)
 	}
 }

@@ -20,14 +20,22 @@ type nodeSettings struct {
 	peers     []string
 	blockTime time.Duration
 	feeDenom  string
+	// ownClient points client.toml at the node's own RPC instead of the
+	// default port, which is node0's. Cosmovisor needs it: it only acts on
+	// an upgrade once `<bin> status --home <home>` reports the plan height.
+	ownClient bool
 }
 
 // configure edits config.toml and app.toml in home and returns the ports it
 // set. Optional ports the chain's config lacks, and listeners the chain
 // ships disabled, are left out.
 func configure(home string, s nodeSettings) ([]Port, error) {
+	files := []string{"config.toml", "app.toml"}
+	if s.ownClient {
+		files = append(files, "client.toml")
+	}
 	docs := map[string]*tomlDoc{}
-	for _, file := range []string{"config.toml", "app.toml"} {
+	for _, file := range files {
 		data, err := os.ReadFile(filepath.Join(home, "config", file))
 		if err != nil {
 			return nil, err
@@ -62,6 +70,11 @@ func configure(home string, s nodeSettings) ([]Port, error) {
 		{"config.toml", cfg.setString("consensus.timeout_commit", s.blockTime.String())},
 		{"app.toml", app.set("api.enable", "true")},
 		{"app.toml", app.setString("minimum-gas-prices", "0"+s.feeDenom)},
+	}
+	if client, ok := docs["client.toml"]; ok {
+		if err := client.setString("node", fmt.Sprintf("tcp://localhost:%d", portIn(s.ports, "rpc.laddr"))); err != nil {
+			return nil, fmt.Errorf("client.toml: %w", err)
+		}
 	}
 	for _, e := range edits {
 		if e.err != nil {

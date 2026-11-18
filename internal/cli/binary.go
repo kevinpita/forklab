@@ -2,10 +2,14 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -158,6 +162,70 @@ func resolveBinary(ctx context.Context, a *app, stderr io.Writer, p profile.Prof
 	b, err := c.Resolve(ctx, p, version, opts)
 	bar.end()
 	return b, err
+}
+
+// cosmovisorBin checks the path given as --cosmovisor-bin.
+func cosmovisorBin(path string) (string, error) {
+	path, err := paths.UserPath(path)
+	if err != nil {
+		return "", err
+	}
+	if info, err := os.Stat(path); err != nil {
+		return "", output.Usagef("--cosmovisor-bin: %v", err)
+	} else if info.IsDir() || info.Mode()&0o111 == 0 {
+		return "", output.Usagef("--cosmovisor-bin %s is not an executable file", path)
+	}
+	return path, nil
+}
+
+// resolveCosmovisor returns the cosmovisor version forklab pins, built and
+// cached on first use.
+func resolveCosmovisor(ctx context.Context, a *app, stderr io.Writer, opts binary.Options) (string, error) {
+	c, err := binaryCache()
+	if err != nil {
+		return "", err
+	}
+	if !a.json && opts.Reporter == nil {
+		opts.BuildLog = stderr
+	}
+	b, err := c.Cosmovisor(ctx, opts)
+	return b.Path, err
+}
+
+// upgradeInfo is the plan info of an upgrade proposal. When cosmovisor
+// downloads the binary it is the link cosmovisor reads: the version's url
+// source with the checksum of what forklab itself downloaded from it, under
+// the platform the nodes run on, goos and this machine's architecture. A
+// source that cosmovisor could not use is refused here, before a proposal
+// that would halt the chain with no binary: cosmovisor unpacks fewer archive
+// formats than forklab and finds the binary only at the top of the archive
+// or in its bin directory.
+func upgradeInfo(bin binary.Binary, download bool, goos string) (string, error) {
+	if !download {
+		return "forklab upgrade to " + bin.Version, nil
+	}
+	const instead = "add a url source cosmovisor can use, or pass --no-auto-swap and deliver the binary yourself"
+	if bin.Kind != binary.KindURL || bin.ArtifactSHA256 == "" {
+		return "", fmt.Errorf("this lab's cosmovisor downloads upgrade binaries, which needs a url source: version %s of profile %s is a %s source; %s", bin.Version, bin.Profile, bin.Kind, instead)
+	}
+	u, err := url.Parse(bin.Source)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasSuffix(strings.ToLower(u.Path), ".tar.lz4") {
+		return "", fmt.Errorf("this lab's cosmovisor downloads upgrade binaries, and cosmovisor cannot unpack a .tar.lz4 archive: %s; %s", bin.Source, instead)
+	}
+	name := filepath.Base(bin.Path)
+	if bin.ArtifactEntry != name && bin.ArtifactEntry != "bin/"+name {
+		return "", fmt.Errorf("this lab's cosmovisor downloads upgrade binaries: cosmovisor looks for %s or bin/%s at the top of the archive, and %s has it at %s; %s", name, name, bin.Source, bin.ArtifactEntry, instead)
+	}
+	checksum := "checksum=sha256:" + bin.ArtifactSHA256
+	if u.RawQuery != "" {
+		checksum = u.RawQuery + "&" + checksum
+	}
+	u.RawQuery = checksum
+	data, err := json.Marshal(map[string]map[string]string{"binaries": {goos + "/" + runtime.GOARCH: u.String()}})
+	return string(data), err
 }
 
 // progress redraws one download line on w each whole percent, or each MiB

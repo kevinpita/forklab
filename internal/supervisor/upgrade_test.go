@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -386,5 +387,134 @@ func TestFailedSwapRecoveredByHandStaysRecovered(t *testing.T) {
 	}
 	if st, err := supervisor.LoadUpgrade(l.dir); err != nil || st == nil || st.Binary != bad {
 		t.Errorf("plan = %+v, %v; want the bad plan still registered for the user to cancel", st, err)
+	}
+}
+
+// cosmovisorLab is a lab whose nodes run under the fake cosmovisor.
+func cosmovisorLab(h *harness, n int, nodeArgs ...string) *lab {
+	h.t.Helper()
+	l := h.lab(n, nodeArgs...)
+	for i := range l.specs {
+		l.specs[i].Cosmovisor = &supervisor.Cosmovisor{Path: os.Args[0], Name: "fake-node"}
+	}
+	if err := supervisor.SaveNodes(l.dir, l.specs); err != nil {
+		h.t.Fatal(err)
+	}
+	return l
+}
+
+func currentSlot(l *lab, i int) string {
+	link, _ := os.Readlink(filepath.Join(l.specs[i].Home, "cosmovisor", "current"))
+	return link
+}
+
+// chainProcesses counts the processes running out of the lab's cosmovisor
+// trees: the chain binaries, not cosmovisor itself.
+func chainProcesses(l *lab) int {
+	count := 0
+	entries, _ := os.ReadDir("/proc")
+	for _, e := range entries {
+		if data, err := os.ReadFile("/proc/" + e.Name() + "/cmdline"); err == nil && strings.HasPrefix(string(data), l.dir+"/node") {
+			count++
+		}
+	}
+	return count
+}
+
+// The plan name has an upper-case letter: cosmovisor looks for its slot
+// under the lower-cased name.
+func TestCosmovisorSwapsThePlacedBinaryAndKillLeavesNoChainProcess(t *testing.T) {
+	h := newHarness(t)
+	versions := versionLog(t)
+	l := cosmovisorLab(h, 2, "--halt", "V2:50", "--halt-delay", "300ms")
+	v2 := upgradedBinary(t)
+	c := up(t, l)
+	if _, err := c.SetUpgrade(&supervisor.Upgrade{Name: "V2", Height: 50, Version: "2.0.0", Binary: v2, AutoSwap: true}); err != nil {
+		t.Fatal(err)
+	}
+	started, err := c.Start(supervisor.All)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitUpTo(t, 15*time.Second, "cosmovisor to swap both nodes", swapped(c, v2, 0, 1))
+	nodes, _ := c.Status()
+	for i, n := range nodes {
+		if n.PID != started[i].PID || !n.Cosmovisor || currentSlot(l, i) != "upgrades/v2" {
+			t.Errorf("node %d = %+v, current -> %q; want cosmovisor pid %d kept and the link on the plan", i, n, currentSlot(l, i), started[i].PID)
+		}
+	}
+	specs, err := supervisor.LoadNodes(l.dir)
+	if err != nil || specs[0].Binary != v2 || specs[1].Binary != v2 {
+		t.Errorf("nodes.json = %+v, %v; want both on %s", specs, err, v2)
+	}
+	if data, _ := os.ReadFile(versions); !strings.Contains(string(data), "0 2.0.0\n") || !strings.Contains(string(data), "1 2.0.0\n") {
+		t.Errorf("recorded versions = %q, want both nodes on 2.0.0", data)
+	}
+
+	// A new supervisor reads the swap off the link.
+	old := supervisorPid(t, l)
+	_ = syscall.Kill(old, syscall.SIGKILL)
+	waitFor(t, "old supervisor to die", func() bool { return !alive(old) })
+	c = up(t, l)
+	after, err := c.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, n := range after {
+		if n.PID != started[i].PID || n.Upgrade != supervisor.SwapDone || !n.Adopted || n.Binary != v2 {
+			t.Errorf("after adoption node %d = %+v, want pid %d adopted and swapped to %s", i, n, started[i].PID, v2)
+		}
+	}
+
+	if chainProcesses(l) != 2 {
+		t.Fatalf("%d chain processes before the kill, want 2", chainProcesses(l))
+	}
+	if _, err := c.Kill(supervisor.All); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the chain binaries to die with cosmovisor", func() bool { return chainProcesses(l) == 0 })
+}
+
+func TestCosmovisorWithoutThePlanBinaryHaltsUntilItIsDelivered(t *testing.T) {
+	h := newHarness(t)
+	l := cosmovisorLab(h, 2, "--halt", "v2:50", "--halt-delay", "300ms")
+	v2 := upgradedBinary(t)
+	c := up(t, l)
+	if _, err := c.SetUpgrade(&supervisor.Upgrade{Name: "v2", Height: 50, Version: "2.0.0", Binary: v2}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Start(supervisor.All); err != nil {
+		t.Fatal(err)
+	}
+	waitUpTo(t, 15*time.Second, "both nodes to halt and cosmovisor to exit", func() bool {
+		nodes, err := c.Status()
+		return err == nil && !slices.ContainsFunc(nodes, func(n supervisor.NodeStatus) bool {
+			return n.State != supervisor.StateExited || n.Upgrade != supervisor.SwapHalted
+		})
+	})
+	if currentSlot(l, 0) != "genesis" || !strings.Contains(logOf(l, 0), "binary not present") {
+		t.Fatalf("node0 current -> %q, want it left on genesis by a cosmovisor that found no binary\n%s", currentSlot(l, 0), logOf(l, 0))
+	}
+
+	// restart --binary relinks; a plain start switches to a binary the
+	// operator placed.
+	if _, err := c.Restart("0", v2, "2.0.0", 0); err != nil {
+		t.Fatal(err)
+	}
+	placed := filepath.Join(l.specs[1].Home, "cosmovisor", "upgrades", "v2", "bin", "fake-node")
+	if err := os.MkdirAll(filepath.Dir(placed), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(v2, placed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Start("1"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "both nodes to run the plan binary", swapped(c, v2, 0, 1))
+	for i := range l.specs {
+		if currentSlot(l, i) != "upgrades/v2" || strings.Count(logOf(l, i), `UPGRADE "v2" NEEDED`) != 1 {
+			t.Errorf("node %d current -> %q, want the plan's slot and a single halt\n%s", i, currentSlot(l, i), logOf(l, i))
+		}
 	}
 }

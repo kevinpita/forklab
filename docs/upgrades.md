@@ -17,7 +17,8 @@ forklab upgrade status
 
 `upgrade schedule` fetches the new binary, submits a software upgrade
 proposal, votes it through, and waits. The plan name comes from the profile's
-`upgrade_name` unless you pass `--name`. `--height` sets an absolute plan
+`upgrade_name` unless you pass `--name`. forklab refuses the names `.` and
+`..` in every lab. `--height` sets an absolute plan
 height instead of `--in`, and `--no-wait` returns as soon as the plan is
 registered.
 
@@ -57,6 +58,113 @@ forklab upgrade schedule 11.2.0 --in 45 --no-auto-swap
 forklab node restart --binary 11.2.0 0
 forklab node restart --binary 11.2.0 1
 ```
+
+## Cosmovisor mode
+
+By default the forklab supervisor swaps the binaries. A lab created with
+`--cosmovisor` runs every node under
+[cosmovisor](https://docs.cosmos.network/main/build/tooling/cosmovisor), and
+cosmovisor switches the binary at the plan height, as on a real validator.
+forklab still submits the proposal, votes, and reports the state.
+
+```sh
+forklab lab create xrp --profile xrplevm --version 11.1.1 --validators 2 --chain-id xrplevm_1449999-1 --cosmovisor
+forklab lab up xrp
+forklab upgrade schedule 11.2.0 --in 45
+```
+
+forklab builds cosmovisor from the cosmos-sdk repository the first time a lab
+needs it and caches it, which needs `git` and Go 1.27.3 or later. The mode is
+fixed when the lab is created. `lab show` names it, and `node list` marks
+each pid `(cosmovisor)`: the pid is cosmovisor's, and the chain binary is its
+child.
+
+> [!IMPORTANT]
+> The cosmovisor forklab builds is not a release. It is
+> [cosmos-sdk pull request 26879](https://github.com/cosmos/cosmos-sdk/pull/26879)
+> at commit `58bf3aad3787`, shown as `pr26879-58bf3aad3787` in the cache
+> path: the cosmos-sdk `main` branch plus a fix that no release has yet.
+> Cosmovisor v1.7.3 exits with code 1 as soon as it is told to stop after
+> it has performed an upgrade, and leaves the chain binary running. The
+> binary then gets killed instead of shutting down. forklab returns to a
+> release when one carries the fix.
+>
+> To see the behavior of a stock release, pass it with
+> `--cosmovisor-bin <path>`. That flag takes any cosmovisor you already
+> have.
+
+Each node home gets the usual cosmovisor tree:
+
+| Path | Contents |
+|------|----------|
+| `cosmovisor/genesis/bin/<binary>` | The binary the lab was created with |
+| `cosmovisor/upgrades/<plan>/bin/<binary>` | The binary for an upgrade plan |
+| `cosmovisor/forklab-manual/bin/<binary>` | Any other binary you tell forklab to run |
+| `cosmovisor/current` | A link to the directory in use |
+
+`<plan>` is the plan name in lower case. Cosmovisor lower-cases the name
+before it looks for the directory, so the binary for a plan named `V2` is in
+`upgrades/v2`. A plan named `.` or `..` would have no directory of its own,
+which is why forklab refuses those names.
+
+forklab puts a copy of each binary in the tree and does not link to your
+file. Cosmovisor sets the execute bits of the binary it runs, and a link
+would change the mode of the original. Where the file system can clone
+files, as btrfs does and XFS does when it was made with reflink support, and
+the binary is on the same file system as the lab, a
+copy shares its blocks with the original. Elsewhere each directory of each
+node holds the binary once more. forklab empties a plan's directory when the
+plan is cancelled, recovered from, or replaced by another plan, also one of
+the same name, unless the node runs from it. A plan that is set again with
+the same name and height counts as the same plan and keeps its directory.
+
+In a cosmovisor lab each node's `config/client.toml` names that node's own
+RPC port. Before it acts on an upgrade, cosmovisor waits for `<binary> status
+--home <home>` to report the plan height, and that command reads
+`client.toml`.
+
+The commands on this page work the same in a cosmovisor lab. These are the
+differences:
+
+- **Scheduled upgrade.** `upgrade schedule` puts the new binary in
+  `cosmovisor/upgrades/<plan>/bin/` on every node as soon as the plan is
+  registered. At the plan height the node halts, cosmovisor moves `current`
+  to that directory, and it starts the new binary. The pid does not change.
+  `upgrade status` shows the node as `swapped` once the link has moved.
+- **Download.** Create the lab with `--cosmovisor-download` and forklab
+  places nothing. The proposal's plan `info` carries a link,
+  `{"binaries":{"linux/amd64":"<url>?checksum=sha256:<hex>"}}`, and
+  cosmovisor downloads the binary itself. The link is the version's `url`
+  source from the profile, and the checksum is the sha256 of the file
+  forklab downloaded from that URL, so the chain does not need to publish
+  checksums. Downloading is a lab setting because cosmovisor reads it when
+  it starts. `upgrade schedule` refuses a version that cosmovisor could not
+  download, before it submits the proposal:
+  - a version with a `path`, `git`, or `src` source;
+  - a `.tar.lz4` archive, which cosmovisor cannot unpack;
+  - an archive with the binary anywhere but `<binary>` or `bin/<binary>` at
+    the top. forklab itself finds the binary at any depth, so such a source
+    works in other labs.
+- **`--no-auto-swap`.** forklab delivers no binary and no download link.
+  At the plan height cosmovisor finds no binary and exits, and the node
+  shows as halted. Run `forklab node restart <i> --binary <version>`, or put
+  the binary in `cosmovisor/upgrades/<plan>/bin/` yourself and run
+  `forklab node start <i>`. The node halts only while that directory is
+  empty: when you put the binary there before the plan height, cosmovisor
+  switches to it at the height like in a scheduled upgrade.
+- **`node restart --binary`.** forklab stops cosmovisor, puts the binary in
+  the tree, points `current` at it, and starts cosmovisor again. The pending
+  plan's binary goes in the plan's directory, and any other binary goes in
+  `cosmovisor/forklab-manual`.
+- **`upgrade recover`.** `--previous` and `--version` change `current` the
+  same way before they restart the validators.
+- **`lab reset`.** The reset removes the cosmovisor tree. The next start
+  builds it again with the creation binary in `genesis`.
+
+> [!NOTE]
+> forklab starts cosmovisor with `UNSAFE_SKIP_BACKUP=true`. Without it
+> cosmovisor copies the whole data directory before each upgrade, which is
+> slow in a forked lab. The rehearsal does not cover that backup.
 
 ## Status and cancel
 

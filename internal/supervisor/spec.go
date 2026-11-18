@@ -11,17 +11,20 @@ import (
 	"slices"
 )
 
-// NodeSpec describes how to run one node. Binary is an absolute path; Args
-// are passed verbatim, so they must include the chain's start subcommand and
-// --home. Home must appear in Args: adoption matches a live pid on it.
+// NodeSpec describes how to run one node. Binary is the chain binary's
+// absolute path; Args are passed to it verbatim, so they must include the
+// chain's start subcommand and --home. Home must appear in Args: adoption
+// matches a live pid on it. Cosmovisor, when set, runs the node under
+// cosmovisor; Binary is then the chain binary its current link holds.
 type NodeSpec struct {
-	Index   int      `json:"index"`
-	Name    string   `json:"name"`
-	Binary  string   `json:"binary"`
-	Args    []string `json:"args"`
-	Home    string   `json:"home"`
-	LogPath string   `json:"log_path"`
-	PidPath string   `json:"pid_path"`
+	Index      int         `json:"index"`
+	Name       string      `json:"name"`
+	Binary     string      `json:"binary"`
+	Args       []string    `json:"args"`
+	Home       string      `json:"home"`
+	LogPath    string      `json:"log_path"`
+	PidPath    string      `json:"pid_path"`
+	Cosmovisor *Cosmovisor `json:"cosmovisor,omitempty"`
 }
 
 // Paths locates the supervisor's files in a lab directory.
@@ -51,6 +54,8 @@ func LoadNodes(labDir string) ([]NodeSpec, error) {
 			return nil, fmt.Errorf("%s: node %d needs binary, home, log_path, and pid_path", path, i)
 		case !slices.Contains(s.Args, s.Home):
 			return nil, fmt.Errorf("%s: node %d args do not mention its home %s", path, i, s.Home)
+		case s.Cosmovisor != nil && (s.Cosmovisor.Path == "" || s.Cosmovisor.Name == ""):
+			return nil, fmt.Errorf("%s: node %d cosmovisor needs path and name", path, i)
 		}
 	}
 	if len(specs) == 0 {

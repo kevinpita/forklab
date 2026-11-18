@@ -5,6 +5,8 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -28,61 +30,65 @@ var httpClient = func() *http.Client {
 }()
 
 // fetch downloads rawURL into stage and leaves the binary named name at dst.
-func fetch(ctx context.Context, rawURL, name, stage, dst string, progress func(done, total int64)) error {
+// It returns the sha256 of what the URL served, archive or bare binary, and
+// the archive member the binary came from, name itself for a bare binary.
+func fetch(ctx context.Context, rawURL, name, stage, dst string, progress func(done, total int64)) (sum, member string, err error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	download := filepath.Join(stage, ".download")
-	if err := get(ctx, rawURL, download, progress); err != nil {
-		return err
+	sum, err = get(ctx, rawURL, download, progress)
+	if err != nil {
+		return "", "", err
 	}
 	base := strings.ToLower(path.Base(u.Path))
 	switch {
 	case strings.HasSuffix(base, ".tar.gz"), strings.HasSuffix(base, ".tgz"):
-		err = extractTar(download, name, dst, func(r io.Reader) (io.Reader, error) { return gzip.NewReader(r) })
+		member, err = extractTar(download, name, dst, func(r io.Reader) (io.Reader, error) { return gzip.NewReader(r) })
 	case strings.HasSuffix(base, ".tar.lz4"):
-		err = extractTar(download, name, dst, func(r io.Reader) (io.Reader, error) { return lz4.NewReader(r), nil })
+		member, err = extractTar(download, name, dst, func(r io.Reader) (io.Reader, error) { return lz4.NewReader(r), nil })
 	case strings.HasSuffix(base, ".zip"):
-		err = extractZip(download, name, dst)
+		member, err = extractZip(download, name, dst)
 	default:
-		err = os.Rename(download, dst)
+		member, err = name, os.Rename(download, dst)
 	}
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	if err := os.RemoveAll(download); err != nil {
-		return err
+		return "", "", err
 	}
-	return os.Chmod(dst, 0o755)
+	return sum, path.Clean(member), os.Chmod(dst, 0o755)
 }
 
-func get(ctx context.Context, rawURL, dst string, progress func(done, total int64)) error {
+func get(ctx context.Context, rawURL, dst string, progress func(done, total int64)) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("GET %s: %s", rawURL, resp.Status)
+		return "", fmt.Errorf("GET %s: %s", rawURL, resp.Status)
 	}
 	f, err := os.Create(dst)
 	if err != nil {
-		return err
+		return "", err
 	}
 	var body io.Reader = resp.Body
 	if progress != nil {
 		body = &progressReader{r: resp.Body, total: resp.ContentLength, fn: progress}
 	}
-	if _, err := io.Copy(f, body); err != nil {
+	hash := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(f, hash), body); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("GET %s: %w", rawURL, err)
+		return "", fmt.Errorf("GET %s: %w", rawURL, err)
 	}
-	return f.Close()
+	return hex.EncodeToString(hash.Sum(nil)), f.Close()
 }
 
 type progressReader struct {
@@ -101,15 +107,17 @@ func (p *progressReader) Read(b []byte) (int, error) {
 
 var errNotInArchive = errors.New("not found in archive")
 
-func extractTar(archive, name, dst string, decompress func(io.Reader) (io.Reader, error)) error {
+// extractTar writes the one member named name, at any depth, to dst and
+// returns where in the archive it was.
+func extractTar(archive, name, dst string, decompress func(io.Reader) (io.Reader, error)) (string, error) {
 	f, err := os.Open(archive)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = f.Close() }()
 	r, err := decompress(f)
 	if err != nil {
-		return err
+		return "", err
 	}
 	tr := tar.NewReader(r)
 	found := ""
@@ -119,29 +127,29 @@ func extractTar(archive, name, dst string, decompress func(io.Reader) (io.Reader
 			break
 		}
 		if err != nil {
-			return err
+			return "", err
 		}
 		if h.Typeflag != tar.TypeReg || path.Base(h.Name) != name {
 			continue
 		}
 		if found != "" {
-			return fmt.Errorf("archive has %s at both %s and %s", name, found, h.Name)
+			return "", fmt.Errorf("archive has %s at both %s and %s", name, found, h.Name)
 		}
 		found = h.Name
 		if err := writeFile(dst, tr); err != nil {
-			return err
+			return "", err
 		}
 	}
 	if found == "" {
-		return fmt.Errorf("%s: %w", name, errNotInArchive)
+		return "", fmt.Errorf("%s: %w", name, errNotInArchive)
 	}
-	return nil
+	return found, nil
 }
 
-func extractZip(archive, name, dst string) error {
+func extractZip(archive, name, dst string) (string, error) {
 	zr, err := zip.OpenReader(archive)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = zr.Close() }()
 	var match *zip.File
@@ -150,19 +158,19 @@ func extractZip(archive, name, dst string) error {
 			continue
 		}
 		if match != nil {
-			return fmt.Errorf("archive has %s at both %s and %s", name, match.Name, zf.Name)
+			return "", fmt.Errorf("archive has %s at both %s and %s", name, match.Name, zf.Name)
 		}
 		match = zf
 	}
 	if match == nil {
-		return fmt.Errorf("%s: %w", name, errNotInArchive)
+		return "", fmt.Errorf("%s: %w", name, errNotInArchive)
 	}
 	r, err := match.Open()
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = r.Close() }()
-	return writeFile(dst, r)
+	return match.Name, writeFile(dst, r)
 }
 
 func writeFile(dst string, r io.Reader) error {

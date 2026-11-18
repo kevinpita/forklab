@@ -228,6 +228,9 @@ type labInfo struct {
 	Profile       struct {
 		Name string `json:"name"`
 	} `json:"profile"`
+	Cosmovisor *struct {
+		Download bool `json:"download"`
+	} `json:"cosmovisor"`
 	Nodes    []labNode `json:"nodes"`
 	Accounts []struct {
 		Name    string `json:"name"`

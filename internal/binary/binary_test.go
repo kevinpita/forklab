@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -112,12 +114,13 @@ func TestResolveURLFormats(t *testing.T) {
 	tests := []struct {
 		name, file string
 		body       []byte
+		entry      string
 	}{
-		{"tar.gz nested like the exrpd release", "chain_{version}_{os}_{arch}.tar.gz", tarGz(t, entry{"README.md", []byte("hi")}, entry{"bin/chaind", bin})},
-		{"tgz at the root", "chain.tgz", tarGz(t, entry{"chaind", bin})},
-		{"zip", "chain.zip", zipOf(t, entry{"dist/linux/chaind", bin}, entry{"dist/linux/chaind.sha256", []byte("x")})},
-		{"tar.lz4", "chain.tar.lz4", tarLz4(t, entry{"./bin/chaind", bin})},
-		{"raw binary", "chaind-{version}", bin},
+		{"tar.gz nested like the exrpd release", "chain_{version}_{os}_{arch}.tar.gz", tarGz(t, entry{"README.md", []byte("hi")}, entry{"bin/chaind", bin}), "bin/chaind"},
+		{"tgz at the root", "chain.tgz", tarGz(t, entry{"chaind", bin}), "chaind"},
+		{"zip", "chain.zip", zipOf(t, entry{"dist/linux/chaind", bin}, entry{"dist/linux/chaind.sha256", []byte("x")}), "dist/linux/chaind"},
+		{"tar.lz4", "chain.tar.lz4", tarLz4(t, entry{"./bin/chaind", bin}), "bin/chaind"},
+		{"raw binary", "chaind-{version}", bin, "chaind"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -138,6 +141,12 @@ func TestResolveURLFormats(t *testing.T) {
 			}
 			if lastDone != int64(len(tt.body)) {
 				t.Errorf("progress ended at %d of %d bytes", lastDone, len(tt.body))
+			}
+			if want := fmt.Sprintf("%x", sha256.Sum256(tt.body)); b.ArtifactSHA256 != want {
+				t.Errorf("artifact sha256 = %s, want %s of what the URL served", b.ArtifactSHA256, want)
+			}
+			if b.ArtifactEntry != tt.entry {
+				t.Errorf("artifact entry = %q, want %q, where the binary is in what the URL served", b.ArtifactEntry, tt.entry)
 			}
 			entries, _ := os.ReadDir(filepath.Dir(b.Path))
 			if len(entries) != 2 {

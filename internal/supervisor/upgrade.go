@@ -154,16 +154,13 @@ func (n *node) markHalted(h Halt) bool {
 	if n.swap == SwapRunning || (n.halt != nil && sameHalt(*n.halt, h)) {
 		return false
 	}
-	h.Binary = n.spec.Binary
-	if n.proc != nil {
-		h.Binary = n.proc.pf.Binary
-	}
+	h.Binary = n.binary()
 	n.halt, n.swap, n.swapErr = &h, SwapHalted, ""
 	return true
 }
 
-// beginSwap moves a node halted on plan name to SwapRunning. The caller
-// holds ops.
+// beginSwap moves a node halted on plan name to SwapRunning. A swap holds
+// ops while the node is in that phase; an observer of cosmovisor does not.
 func (n *node) beginSwap(name string) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -239,18 +236,113 @@ func (s *supervisor) NodeLine(index int, line string) {
 }
 
 // swapIfDue starts the swap of a halted node when the pending upgrade
-// names its plan and wants auto swap.
+// names its plan and wants auto swap. A cosmovisor node is only observed,
+// whatever the plan wants: cosmovisor swaps when it finds the binary.
 func (s *supervisor) swapIfDue(n *node) {
 	up := s.pending()
 	phase, h := n.swapState()
-	if up == nil || phase != SwapHalted || !up.AutoSwap {
+	cosmovisor := n.currentSpec().Cosmovisor != nil
+	if up == nil || phase != SwapHalted || (cosmovisor && up.Recovery != nil) || (!cosmovisor && !up.AutoSwap) {
 		return
 	}
 	if h.Name != up.Name {
 		s.log.Printf("node %d: halted on %q, but the pending upgrade is %q; not swapping", n.spec.Index, h.Name, up.Name)
 		return
 	}
+	if cosmovisor {
+		go s.observeSwap(n, *up)
+		return
+	}
 	go s.swap(n, *up)
+}
+
+// observeSwap follows a halted cosmovisor node until cosmovisor has moved
+// its current link to the plan's slot and relaunched the chain binary, or
+// has exited because it has no binary for the plan. A node that exits is a
+// failed swap when the plan promised the binary, and stays halted for the
+// operator otherwise. beginSwap admits one observer per halt.
+func (s *supervisor) observeSwap(n *node, up Upgrade) {
+	if !n.beginSwap(up.Name) {
+		return
+	}
+	spec := n.currentSpec()
+	dir, logEnd := spec.cosmovisorDir(), fileSize(spec.LogPath)
+	same := func() bool {
+		cur := s.pending()
+		return cur != nil && cur.Name == up.Name && cur.Height == up.Height && cur.Recovery == nil
+	}
+	for p := n.running(); p != nil && same() && dir.current() != planSlot(up.Name); {
+		select {
+		case <-p.gone:
+			p = nil
+		case <-s.stop:
+			return
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	n.ops.Lock()
+	defer n.ops.Unlock()
+	if phase, _ := n.swapState(); phase != SwapRunning || s.closing.Load() {
+		return
+	}
+	switch index := spec.Index; {
+	case same() && s.syncCosmovisor(n, &up):
+		n.setSwap(SwapDone, nil)
+		s.log.Printf("node %d: cosmovisor switched to %s", index, up.Binary)
+	case same() && up.AutoSwap:
+		err := fmt.Errorf("cosmovisor exited without switching to upgrade %q%s", up.Name, logSince(spec.LogPath, logEnd))
+		n.setSwap(SwapFailed, err)
+		s.log.Printf("node %d: swap failed: %v", index, err)
+	default:
+		n.setSwap(SwapHalted, nil)
+	}
+	_ = s.saveState()
+}
+
+// syncCosmovisor records a move of a cosmovisor node's current link to the
+// plan's slot that the supervisor did not make: cosmovisor's at the halt,
+// or the one a start makes for a binary the operator placed. The node then
+// runs the plan's binary. It reports whether the link names the plan. The
+// caller holds ops.
+func (s *supervisor) syncCosmovisor(n *node, up *Upgrade) bool {
+	spec := n.currentSpec()
+	if spec.Cosmovisor == nil || up == nil || up.Recovery != nil || spec.cosmovisorDir().current() != planSlot(up.Name) {
+		return false
+	}
+	s.persistBinary(n, up.Binary, up.Version)
+	return true
+}
+
+// placeUpgrade puts the plan's binary where a cosmovisor node will look for
+// it at the plan height, unless the plan leaves the swap to the operator
+// or cosmovisor downloads the binary itself. The caller holds ops.
+func (s *supervisor) placeUpgrade(n *node, up *Upgrade) {
+	spec := n.currentSpec()
+	if cv := spec.Cosmovisor; cv == nil || cv.Download || !up.AutoSwap || up.Recovery != nil {
+		return
+	}
+	dir, slot := spec.cosmovisorDir(), planSlot(up.Name)
+	if dir.current() == slot {
+		return
+	}
+	if err := dir.place(slot, up.Binary); err != nil {
+		s.log.Printf("node %d: place %s for upgrade %q: %v", spec.Index, up.Binary, up.Name, err)
+	}
+}
+
+// relink makes a stopped cosmovisor node's current link hold binary: in the
+// pending plan's slot when it is the plan's binary, else in the manual
+// slot. The caller holds ops.
+func (s *supervisor) relink(n *node, binary string) error {
+	slot := manualSlot
+	if up := s.pending(); up != nil && up.Binary == binary {
+		slot = planSlot(up.Name)
+	}
+	dir := n.currentSpec().cosmovisorDir()
+	if err := dir.place(slot, binary); err != nil {
+		return err
+	}
+	return dir.setCurrent(slot)
 }
 
 // swap restarts a halted node on the upgrade binary. beginSwap admits only
@@ -315,6 +407,9 @@ func (s *supervisor) replaceUpgrade(expected, up *Upgrade) error {
 		}
 	}
 	if up != nil {
+		if err := PlanName(up.Name); err != nil {
+			return err
+		}
 		if up.Recovery == nil {
 			if err := isExecutable(up.Binary); err != nil {
 				return err
@@ -352,10 +447,37 @@ func (s *supervisor) replaceUpgrade(expected, up *Upgrade) error {
 	} else {
 		s.log.Printf("upgrade %q at height %d pending: %s (auto swap %t)", up.Name, up.Height, up.Binary, up.AutoSwap)
 	}
+	// A plan that takes the place of another starts from an empty slot:
+	// what the other staged there is not this plan's binary, and cosmovisor
+	// runs whatever it finds at the height. The same plan set again, with
+	// its proposal or for a recovery, keeps what it has.
+	replaced := old != nil && (up == nil || planSlot(up.Name) != planSlot(old.Name) || up.Height != old.Height)
 	for _, n := range s.nodes {
+		if replaced {
+			s.unstage(n, old)
+		}
 		s.reconcile(n, up)
 	}
 	return s.saveState()
+}
+
+// unstage removes what is in the slot of a plan that is over, unless the
+// node runs from it. A later plan of the same name would otherwise find
+// that binary at its height and cosmovisor would run it.
+func (s *supervisor) unstage(n *node, old *Upgrade) {
+	n.ops.Lock()
+	defer n.ops.Unlock()
+	spec := n.currentSpec()
+	if spec.Cosmovisor == nil || PlanName(old.Name) != nil {
+		return
+	}
+	dir, slot := spec.cosmovisorDir(), planSlot(old.Name)
+	if dir.current() == slot {
+		return
+	}
+	if err := os.RemoveAll(filepath.Join(dir.root(), slot)); err != nil {
+		s.log.Printf("node %d: remove the binary staged for upgrade %q: %v", spec.Index, old.Name, err)
+	}
 }
 
 // complete moves the pending upgrade named name to completed once every
@@ -392,6 +514,7 @@ func (s *supervisor) completeExpected(name string, expected *Upgrade) error {
 	s.log.Printf("upgrade %q at height %d completed", up.Name, up.Height)
 	for _, n := range s.nodes {
 		s.reconcile(n, nil)
+		s.unstage(n, up)
 	}
 	return s.saveState()
 }
@@ -401,8 +524,8 @@ func (s *supervisor) completeExpected(name string, expected *Upgrade) error {
 // case the previous supervisor died before doing so. A node that finished
 // an earlier upgrade, or that was moved off the binary that halted, starts
 // clean. A node still on the binary that halted, including one whose swap
-// failed, is swapped now when the plan is its own. Clearing the upgrade
-// forgets every halt.
+// failed, is swapped now when the plan is its own, unless its swap is
+// already being observed. Clearing the upgrade forgets every halt.
 func (s *supervisor) reconcile(n *node, up *Upgrade) {
 	n.ops.Lock()
 	defer n.ops.Unlock()
@@ -410,6 +533,8 @@ func (s *supervisor) reconcile(n *node, up *Upgrade) {
 		n.setSwap(SwapNone, nil)
 		return
 	}
+	s.placeUpgrade(n, up)
+	s.syncCosmovisor(n, up)
 	phase, h := n.swapState()
 	switch {
 	case n.status().Binary == up.Binary:
@@ -417,6 +542,7 @@ func (s *supervisor) reconcile(n *node, up *Upgrade) {
 		s.persistBinary(n, up.Binary, up.Version)
 	case phase == SwapDone || (h != nil && h.Binary != "" && h.Binary != n.status().Binary):
 		n.setSwap(SwapNone, nil)
+	case phase == SwapRunning:
 	case h != nil:
 		n.setSwap(SwapHalted, nil)
 		s.swapIfDue(n)
@@ -479,7 +605,7 @@ func LoadUpgradeStatus(dir string) (Response, error) {
 	}
 	out := Response{Upgrade: st.Plan, Completed: st.Completed}
 	for _, spec := range specs {
-		n := NodeStatus{Index: spec.Index, Name: spec.Name, Binary: spec.Binary, State: StateStopped}
+		n := NodeStatus{Index: spec.Index, Name: spec.Name, Binary: spec.Binary, Cosmovisor: spec.Cosmovisor != nil, State: StateStopped}
 		if h, ok := st.Halts[spec.Index]; ok {
 			n.Halt = &h
 			n.Upgrade = SwapHalted
@@ -524,6 +650,7 @@ func (s *supervisor) finishRecovery(expected *Upgrade) error {
 	}
 	for _, n := range s.nodes {
 		s.reconcile(n, nil)
+		s.unstage(n, up)
 	}
 	return s.saveState()
 }

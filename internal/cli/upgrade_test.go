@@ -27,6 +27,22 @@ func TestUpgradeStatusReportsACompletedUpgrade(t *testing.T) {
 	}
 }
 
+func TestScheduleSaysWhoSwapsTheBinary(t *testing.T) {
+	plan := supervisor.Upgrade{Name: "v2", Height: 50, Version: "2.0.0", AutoSwap: true}
+	for _, c := range []struct {
+		cosmovisor bool
+		want       string
+	}{{false, "the supervisor swaps each node to 2.0.0"}, {true, "cosmovisor swaps each node to 2.0.0"}} {
+		var b strings.Builder
+		if err := (scheduleView{Plan: plan, Cosmovisor: c.cosmovisor}).WriteHuman(&b); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(b.String(), c.want) {
+			t.Errorf("cosmovisor %t: schedule =\n%s\nwant %q", c.cosmovisor, b.String(), c.want)
+		}
+	}
+}
+
 func TestUpgradeScheduleNeedsExactlyOneHeightFlag(t *testing.T) {
 	for _, args := range [][]string{
 		{"upgrade", "schedule", "1.0"},
@@ -35,6 +51,16 @@ func TestUpgradeScheduleNeedsExactlyOneHeightFlag(t *testing.T) {
 	} {
 		if code, _, stderr := run(args...); code != 2 {
 			t.Errorf("%v: code %d, %s; want usage error 2", args, code, stderr)
+		}
+	}
+}
+
+func TestUpgradeScheduleRefusesAPlanNameWithoutASlotOfItsOwn(t *testing.T) {
+	t.Setenv("FORKLAB_HOME", t.TempDir())
+	for _, name := range []string{"..", "."} {
+		args := []string{"upgrade", "schedule", "1.0", "--in", "10", "--name", name, "--lab", "absent"}
+		if code, _, stderr := run(args...); code != 2 || !strings.Contains(stderr, "upgrade plan name") {
+			t.Errorf("%v: code %d, %s; want usage error 2 about the plan name", args, code, stderr)
 		}
 	}
 }

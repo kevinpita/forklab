@@ -203,10 +203,11 @@ func swappedOrCompleted(t *testing.T, st upgradeStatusView) bool {
 // which fails on a fresh chain that carries the mainnet chain id.
 const labChainID = "xrplevm_1449999-1"
 
-// upLab creates a fresh exrpd lab on the old release and brings it up.
-func upLab(t *testing.T, name string) (string, lab.Config) {
+// upLab creates a fresh exrpd lab on the old release, with any extra lab
+// create flags, and brings it up.
+func upLab(t *testing.T, name string, create ...string) (string, lab.Config) {
 	t.Helper()
-	forklab(t, "lab", "create", name, "--profile", "xrplevm", "--version", exrpdOld, "--validators", "2", "--chain-id", labChainID)
+	forklab(t, append([]string{"lab", "create", name, "--profile", "xrplevm", "--version", exrpdOld, "--validators", "2", "--chain-id", labChainID}, create...)...)
 	l, err := labs()
 	if err != nil {
 		t.Fatal(err)
@@ -335,8 +336,8 @@ func oldBin(t *testing.T) string {
 	return os.Getenv("FORKLAB_EXRPD_OLD")
 }
 
-func manualSwap(t *testing.T, name, newBin string) {
-	dir, c := upLab(t, name)
+func manualSwap(t *testing.T, name, newBin string, create ...string) {
+	dir, c := upLab(t, name, create...)
 	v := forklabData[scheduleView](t, "upgrade", "schedule", exrpdNew, "--in", planIn, "--no-auto-swap", "--lab", name)
 	if v.Upgraded || v.Plan.AutoSwap {
 		t.Fatalf("schedule --no-auto-swap = %+v", v)

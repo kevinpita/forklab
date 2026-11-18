@@ -40,6 +40,11 @@ type CreateInput struct {
 	ChainID string
 	// Fork forks exported chain state instead of building a fresh genesis.
 	Fork *ForkInput
+	// Cosmovisor, when set, makes the nodes run under the cosmovisor binary
+	// it resolves. It runs after Binary, since it may build.
+	Cosmovisor func(context.Context) (string, error)
+	// CosmovisorDownload makes cosmovisor fetch upgrade binaries itself.
+	CosmovisorDownload bool
 }
 
 // ForkInput is the chain state a fork lab takes over.
@@ -99,6 +104,14 @@ func (l Labs) Create(ctx context.Context, in CreateInput) (Config, string, error
 	if err != nil {
 		return Config{}, "", err
 	}
+	var cosmovisor *Cosmovisor
+	if in.Cosmovisor != nil {
+		path, err := in.Cosmovisor(ctx)
+		if err != nil {
+			return Config{}, "", err
+		}
+		cosmovisor = &Cosmovisor{Path: path, Download: in.CosmovisorDownload}
+	}
 	var exported *exportedState
 	if in.Fork != nil {
 		if exported, err = loadExport(ctx, bin, *in.Fork, in.Reporter); err != nil {
@@ -128,7 +141,7 @@ func (l Labs) Create(ctx context.Context, in CreateInput) (Config, string, error
 	}
 	defer func() { _ = logFile.Close() }()
 
-	b := builder{in: in, p: in.Profile.Profile, dir: dir, partial: partial, ports: ports, exported: exported, cli: chainCLI{ctx: ctx, bin: bin, log: logFile}}
+	b := builder{in: in, p: in.Profile.Profile, dir: dir, partial: partial, ports: ports, exported: exported, cosmovisor: cosmovisor, cli: chainCLI{ctx: ctx, bin: bin, log: logFile}}
 	c, err := b.build()
 	if err != nil {
 		return Config{}, "", fmt.Errorf("lab %s: %w (log: %s)", in.Name, err, logPath)
@@ -179,8 +192,9 @@ type builder struct {
 	partial string
 	ports   [][]Port
 	// exported is the parsed chain state in fork mode.
-	exported *exportedState
-	cli      chainCLI
+	exported   *exportedState
+	cosmovisor *Cosmovisor
+	cli        chainCLI
 }
 
 // exportedState is the exported genesis a fork lab takes over.
@@ -224,6 +238,7 @@ func (b *builder) build() (Config, error) {
 		Validators: b.in.Validators,
 		CreatedAt:  time.Now().UTC().Truncate(time.Second),
 		Profile:    b.in.Profile.Snapshot(),
+		Cosmovisor: b.cosmovisor,
 	}
 	if b.exported != nil {
 		c.Mode = ModeFork
@@ -494,7 +509,7 @@ func (b *builder) configure(nodes []Node) error {
 				peers = append(peers, fmt.Sprintf("%s@127.0.0.1:%d", other.NodeID, portIn(b.ports[j], "p2p.laddr")))
 			}
 		}
-		ports, err := configure(b.home(i), nodeSettings{ports: b.ports[i], peers: peers, blockTime: b.p.BlockTime, feeDenom: b.p.FeeDenom})
+		ports, err := configure(b.home(i), nodeSettings{ports: b.ports[i], peers: peers, blockTime: b.p.BlockTime, feeDenom: b.p.FeeDenom, ownClient: b.cosmovisor != nil})
 		if err != nil {
 			return fmt.Errorf("configure %s: %w", nodes[i].Name, err)
 		}
@@ -512,11 +527,15 @@ func (b *builder) nodeSpecs(nodes []Node) []supervisor.NodeSpec {
 		if noColor {
 			args = append(args, "--log_no_color")
 		}
-		specs = append(specs, supervisor.NodeSpec{
+		spec := supervisor.NodeSpec{
 			Index: n.Index, Name: n.Name, Binary: b.cli.bin, Args: args, Home: home,
 			LogPath: filepath.Join(home, "node.log"),
 			PidPath: filepath.Join(home, "node.pid"),
-		})
+		}
+		if cv := b.cosmovisor; cv != nil {
+			spec.Cosmovisor = &supervisor.Cosmovisor{Path: cv.Path, Name: b.p.BinaryName, Download: cv.Download}
+		}
+		specs = append(specs, spec)
 	}
 	return specs
 }
